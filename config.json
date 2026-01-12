@@ -1,0 +1,80 @@
+{
+  "project_name": "Avia-Geo-Fusion",
+  "project_description": "Совмещение спутниковых карт и данных с бортовой видеокамеры для уточнения геолокализации в задачах гражданской авиации",
+  
+  "mission_parameters": {
+    "start_coordinates": {
+      "latitude": 55.086025,
+      "longitude": 38.149033,
+      "description": "Геометка старта полета"
+    },
+    "start_altitude_m": 750,
+    "altitude_unit": "meters",
+    "flight_type": "UAV",
+    "camera_source": "GoPro"
+  },
+  
+  "video_files": [
+    {
+      "name": "GOPR0269.MP4",
+      "type": "primary",
+      "description": "Основное видео полета"
+    },
+    {
+      "name": "GP010269.MP4",
+      "type": "secondary",
+      "description": "Альтернативное видео"
+    }
+  ],
+  
+  "processing_stages": {
+    "1_video_analysis": {
+      "description": "Загрузка и анализ видео с GoPro",
+      "status": "pending"
+    },
+    "2_metadata_extraction": {
+      "description": "Извлечение метаданных из видео",
+      "status": "pending"
+    },
+    "3_satellite_maps": {
+      "description": "Загрузка спутниковых карт",
+      "status": "pending"
+    },
+    "4_georeference": {
+      "description": "Геореференцирование видеокадров",
+      "status": "pending"
+    },
+    "5_segmentation": {
+      "description": "Сегментация изображений",
+      "status": "pending"
+    },
+    "6_feature_matching": {
+      "description": "Сопоставление признаков между видео и спутниковыми данными",
+      "status": "pending"
+    },
+    "7_geolocation_refinement": {
+      "description": "Уточнение геолокализации",
+      "status": "pending"
+    }
+  },
+  
+  "processing_parameters": {
+    "video_sampling_rate": 30,
+    "min_object_area_px": 100,
+    "canny_low_threshold": 50,
+    "canny_high_threshold": 150,
+    "segmentation_methods": [
+      "color_range",
+      "threshold",
+      "edges",
+      "sky_ground_separation"
+    ]
+  },
+  
+  "output_paths": {
+    "results": "./results",
+    "data": "./data",
+    "notebooks": "./notebooks",
+    "models": "./models"
+  }
+}

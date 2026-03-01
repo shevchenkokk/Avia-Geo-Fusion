@@ -17,6 +17,15 @@ from pathlib import Path
 from typing import Optional, Tuple, List, Dict
 from dataclasses import dataclass
 
+try:
+    from .telemetry import TelemetryExtractor, GeoPosition
+except ImportError:
+    # Фоллбэк, если запуск идет не как пакет
+    import os
+    import sys
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    from telemetry import TelemetryExtractor, GeoPosition
+
 
 @dataclass
 class VideoInfo:
@@ -40,15 +49,21 @@ class VideoInfo:
 class VideoProcessor:
     """Класс для обработки видеофайлов и анализа данных"""
     
-    def __init__(self, video_path: str):
+    def __init__(self, video_path: str, default_geo: Optional[Tuple[float, float, float]] = None):
         """
         Инициализирует процессор видео
         
         Args:
             video_path: путь к видеофайлу
+            default_geo: (lat, lon, alt) - стартовые координаты БПЛА для фоллбэка, если телеметрии в кадрах нет.
         """
         self.video_path = Path(video_path)
         self.info = self._analyze_video()
+        
+        # Интеграция телеметрии:
+        self.telemetry = TelemetryExtractor(str(self.video_path), default_pos=default_geo)
+        self.has_telemetry = self.telemetry.check_telemetry_stream()
+        print(f"[{self.video_path.name}] Телеметрия GPMF найдена: {self.has_telemetry}")
     
     def _analyze_video(self) -> VideoInfo:
         """Анализирует видеофайл и извлекает основную информацию"""

@@ -1,0 +1,7 @@
+*.MP4
+*.mp4
+**/.DS_Store
+__pycache__/
+results/
+data/
+.venv/

@@ -9,17 +9,21 @@ import numpy as np
 import logging
 import kornia as K
 import kornia.feature as KF
+from src.segmentation import SkySegmenter
 
 logger = logging.getLogger(__name__)
 
 class NeuralMatcher:
     """Нейросетевой мэтчер на основе LoFTR."""
 
-    def __init__(self, pretrained_model: str = 'outdoor'):
+    def __init__(self, pretrained_model: str = 'outdoor', use_segmentation: bool = True):
         """
         Инициализация нейросети и определение устройства (CPU/MPS/CUDA).
         """
         self.device = torch.device("cpu")
+        self.use_segmentation = use_segmentation
+        self.segmenter = SkySegmenter() if use_segmentation else None
+
         
         # Поддержка Apple Silicon (M1/M2/M3)
         if torch.backends.mps.is_available():
@@ -36,39 +40,40 @@ class NeuralMatcher:
         # 'outdoor' - обучена на MegaDepth (ландшафты, здания, города)
         self.matcher = KF.LoFTR(pretrained=pretrained_model).to(self.device).eval()
 
-    def _prepare_image(self, img: np.ndarray, max_size: int = 640) -> torch.Tensor:
+    def _prepare_image(self, img: np.ndarray, max_size: int = 640, is_drone: bool = False) -> tuple:
         """
         Подготовка изображения для LoFTR:
-        - Перевод в градации серого
-        - Изменение размера (чтобы избежать Out Of Memory)
-        - Перевод в тензор PyTorch и нормализация к [0, 1]
+        - Возвращает (тензор, чб_изображение_оригинального_размера, коэффициент_масштабирования)
         """
-        # 1. Сжатие для ускорения и экономии памяти
+        if is_drone and self.use_segmentation and self.segmenter:
+            img = self.segmenter.remove_sky(img)
+
+        # Градации серого для оригинала (чтобы вернуть и рисовать по нему)
+        if len(img.shape) == 3:
+            img_gray_orig = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        else:
+            img_gray_orig = img
+
         h, w = img.shape[:2]
+        scale = 1.0
         if max(h, w) > max_size:
             scale = max_size / max(h, w)
             new_w, new_h = int(w * scale), int(h * scale)
-            img = cv2.resize(img, (new_w, new_h))
-            
-        # 2. Градации серого
-        if len(img.shape) == 3:
-            img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            img_resized = cv2.resize(img_gray_orig, (new_w, new_h))
         else:
-            img_gray = img
+            img_resized = img_gray_orig
             
-        # 3. Тензор [1, 1, H, W], float32, нормализация 0..1
-        tensor = K.image_to_tensor(img_gray, keepdim=False).float() / 255.0
-        return tensor.to(self.device), img_gray
+        tensor = K.image_to_tensor(img_resized, keepdim=False).float() / 255.0
+        return tensor.to(self.device), img_gray_orig, scale
 
     def match(self, img_drone: np.ndarray, img_map: np.ndarray) -> dict:
         """
         Поиск совпадений с помощью LoFTR.
         """
-        tensor_drone, gray_drone = self._prepare_image(img_drone)
-        tensor_map, gray_map = self._prepare_image(img_map)
+        tensor_drone, gray_drone_orig, scale_drone = self._prepare_image(img_drone, is_drone=True)
+        tensor_map, gray_map_orig, scale_map = self._prepare_image(img_map, is_drone=False)
         
         # LoFTR требует, чтобы размеры сторон были кратны 8
-        # Добавим паддинг (pad), если необходимо, чтобы не ловить ошибки
         def pad_to_multiple(tensor, multiple=8):
             _, _, h, w = tensor.shape
             pad_h = (multiple - (h % multiple)) % multiple
@@ -83,23 +88,23 @@ class NeuralMatcher:
             "image1": tensor_map_pad
         }
 
-        # Inference
         with torch.no_grad():
             matches_dict = self.matcher(input_dict)
             
-        # Извлекаем координаты
         mkpts0 = matches_dict['keypoints0'].cpu().numpy()
         mkpts1 = matches_dict['keypoints1'].cpu().numpy()
         confidence = matches_dict['confidence'].cpu().numpy()
 
-        # Фильтруем те, у которых уверенность сети ниже порога
+        # Возвращаем координаты в исходный масштаб оригинального изображения
+        mkpts0 = mkpts0 / scale_drone
+        mkpts1 = mkpts1 / scale_map
+
         conf_thresh = 0.2
         valid = confidence > conf_thresh
         mkpts0 = mkpts0[valid]
         mkpts1 = mkpts1[valid]
         confidence = confidence[valid]
         
-        # --- ФИЛЬТРАЦИЯ ЧЕРЕЗ RANSAC ---
         inlier_mask = np.zeros(len(mkpts0), dtype=bool)
         if len(mkpts0) > 4:
             H, mask = cv2.findHomography(mkpts0, mkpts1, cv2.RANSAC, 5.0)
@@ -111,8 +116,7 @@ class NeuralMatcher:
 
         logger.info(f"LoFTR нашел {len(mkpts0)} совпадений, после RANSAC: {len(mkpts0_inliers)}")
 
-        # Отрисовка
-        debug_img = self._draw_matches(gray_drone, gray_map, mkpts0_inliers, mkpts1_inliers)
+        debug_img = self._draw_matches(gray_drone_orig, gray_map_orig, mkpts0_inliers, mkpts1_inliers)
 
         return {
             'mkpts0': mkpts0_inliers,

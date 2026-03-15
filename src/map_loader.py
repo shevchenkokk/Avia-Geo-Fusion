@@ -41,14 +41,30 @@ class MapDownloader:
     def download_tile(self, x: int, y: int, z: int) -> Optional[Image.Image]:
         """Скачивает один тайл (256x256)"""
         url = self.provider_url.format(x=x, y=y, z=z)
+        
+        # Настройка сессии с повторными попытками для обхода SSL-сбоев
+        session = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(max_retries=3)
+        session.mount('https://', adapter)
+        
         try:
-            response = requests.get(url, headers=self.headers, timeout=10)
+            response = session.get(url, headers=self.headers, timeout=10)
             response.raise_for_status()
             return Image.open(BytesIO(response.content)).convert("RGB")
         except Exception as e:
             logger.error(f"Ошибка загрузки тайла ({x}, {y}, {z}): {e}")
-            # Возвращаем черный квадрат в случае ошибки
-            return Image.new('RGB', (256, 256), color='black')
+            # Пытаемся взять альтернативный публичный резервный сервер (Esri), если Google отвалился
+            if 'google' in self.provider_url:
+                try:
+                    logger.info("Пробуем резервный сервер Esri...")
+                    fallback_url = PROVIDERS['esri_satellite'].format(x=x, y=y, z=z)
+                    resp = session.get(fallback_url, headers=self.headers, timeout=10)
+                    resp.raise_for_status()
+                    return Image.open(BytesIO(resp.content)).convert("RGB")
+                except Exception:
+                    pass
+            # Если всё провалилось, возвращаем серый квадрат (чтобы LoFTR не сходил с ума от черного)
+            return Image.new('RGB', (256, 256), color=(128, 128, 128))
 
     def get_basemap_for_location(self, lat: float, lon: float, radius_tiles: int = 2) -> Tuple[Image.Image, Tuple[float, float, float, float]]:
         """

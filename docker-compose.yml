@@ -1,0 +1,10 @@
+services:
+  avia-geo-fusion:
+    build: .
+    image: avia-geo-fusion:dev
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    environment:
+      PYTHONPATH: /workspace
+    command: bash

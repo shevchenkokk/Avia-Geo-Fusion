@@ -1,7 +1,59 @@
+# OS / editor
+.DS_Store
+**/.DS_Store
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local secrets
+.env
+*.token
+
+# Generated outputs and experiment runs
+results/
+logs/
+
+# Large media and model weights
 *.MP4
 *.mp4
-**/.DS_Store
-__pycache__/
-results/
-data/
-.venv/
+*.mov
+*.avi
+*.pth
+*.pt
+*.ckpt
+*.onnx
+
+# Docs
+docs/predefense_presentation_plan.md
+
+# Data policy: keep only small reproducibility artifacts in git.
+data/*
+!data/dem/
+!data/dem/*.tif
+!data/eval/
+!data/eval/**
+!data/masks/
+data/masks/*
+!data/masks/anchors/
+!data/masks/anchors/**
+!data/retrieval/
+!data/retrieval/db_z14.json
+!data/retrieval/db_z14.npz
+!data/overture_ru_dataset_starter/
+data/overture_ru_dataset_starter/*
+!data/overture_ru_dataset_starter/*.json
+!data/overture_ru_dataset_starter/*.csv
+!data/overture_ru_dataset_starter/vectors/
+!data/overture_ru_dataset_starter/vectors/**
+data/overture_ru_dataset_starter/vectors/**/*.state
+
+# Heavy regenerated Overture products.
+data/overture_ru_dataset_starter/images/
+data/overture_ru_dataset_starter/masks/
+data/overture_ru_dataset_starter/quality_preview/

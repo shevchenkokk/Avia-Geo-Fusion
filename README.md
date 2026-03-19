@@ -1,153 +1,209 @@
 # Avia-Geo-Fusion
 
-**Совмещение спутниковых карт и данных с бортовой видеокамеры для уточнения геолокализации в задачах гражданской авиации**
+Совмещение спутниковых карт и бортового видео для уточнения геолокализации в задачах БПЛА.
 
-## Описание проекта
+## Текущее состояние репозитория
 
-Проект направлен на разработку методов и алгоритмов для уточнения геолокализации беспилотных летательных аппаратов (БПЛА) путем совмещения видеоданных с бортовых камер (GoPro) и спутниковых карт высокого разрешения.
+- Canonical integration runner: `scripts/run_full_pipeline.py`.
+- Legacy/HUD/diagnostic runners лежат в `scripts/pipeline/`.
+- Component verify/smoke скрипты лежат в `scripts/`.
+- Видео хранится в `data/videos/`.
+- Предподготовленные локальные артефакты для `GP010269.MP4`: `configs/camera_gopro_hx.yaml`, `data/masks/anchors/`, `data/retrieval/db_z14.*`.
 
-### Ключевые параметры миссии
+## Структура
 
-- **Место старта:** 55.086025°N, 38.149033°E
-- **Высота при отцепе:** 750 м
-- **Источник видео:** GoPro (GOPR0269.MP4, GP010269.MP4)
-- **Цель:** Уточнение геолокализации и создание геоданных
-
-## Структура проекта
-
-```
+```text
 Avia-Geo-Fusion/
-├── notebooks/
-│   └── video_analysis.ipynb        # Основной ноутбук для анализа
-├── src/
-│   └── video_processor.py          # Модуль обработки видео
-├── data/                           # Входные данные
-├── results/                        # Результаты обработки
-├── config.json                     # Конфигурация проекта
-└── README.md                       # Этот файл
+  configs/
+  data/
+    videos/
+  docs/
+  notebooks/
+  results/
+  scripts/
+    run_full_pipeline.py
+    end_to_end_smoke.py
+    build_retrieval_db.py
+    recover_intrinsics.py
+    seed_aircraft_masks.py
+    verify_obstruction_detector.py
+    verify_dem_lookup.py
+    verify_optical_flow_vo.py
+    pipeline/
+      quick_analysis.py
+      run_rigid_experiment.py
+      run_3d_experiment.py
+      run_hud_video.py
+      run_trajectory.py
+      run_video_pipeline.py
+      run_overture_dataset_pipeline.py
+    manual/
+      seg_bench/
+  src/
+  pyproject.toml
+  README.md
 ```
 
-## Этапы работы
-
-### 1. Загрузка и анализ видео с GoPro
-- Чтение видеофайлов
-- Извлечение параметров видео (разрешение, FPS, длительность)
-- Визуализация кадров
-
-### 2. Извлечение метаданных
-- Анализ метаданных видео (ffprobe)
-- Поиск GPS-координат и данных датчиков
-- Извлечение информации о телеметрии
-
-### 3. Загрузка спутниковых карт
-- Подключение к сервисам спутниковых снимков (Google Maps, Esri, OpenStreetMap)
-- Загрузка снимков для заданной геолокации
-- Создание интерактивных карт (Folium)
-
-### 4. Геореференцирование кадров
-- Связь видеокадров с географическими координатами
-- Учет высоты полета и параметров камеры
-- Создание таблицы с геоданными
-
-### 5. Сегментация изображений
-- Выделение неба и земли
-- Обнаружение объектов интереса
-- Применение методов компьютерного зрения:
-  - Пороговая сегментация (Thresholding)
-  - Выделение контуров (Canny)
-  - Цветовая сегментация (HSV)
-
-### 6. Сопоставление спутниковых данных с видео
-- Извлечение признаков (SIFT, ORB, SURF)
-- Сопоставление между видеокадрами и спутниковыми снимками
-- Определение соответствий
-
-### 7. Уточнение геолокализации
-- Использование результатов сопоставления
-- Коррекция координат
-- Оценка точности
-
-## Требуемые библиотеки
+## Установка
 
 ```bash
-pip install opencv-python numpy pandas matplotlib folium
-pip install pillow scikit-image scikit-learn
-pip install jupyter jupyterlab
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
 ```
 
-### Системные требования
-
-- **ffprobe** (для извлечения метаданных видео)
-  
-  macOS:
-  ```bash
-  brew install ffmpeg
-  ```
-  
-  Linux (Ubuntu/Debian):
-  ```bash
-  sudo apt-get install ffmpeg
-  ```
-
-## Использование
-
-### Запуск ноутбука
+Опциональные зависимости:
 
 ```bash
-cd /Users/kirill/Documents/Avia-Geo-Fusion
-jupyter notebook notebooks/video_analysis.ipynb
+pip install -e ".[geo]"       # DEM/Overture/rasterio/geopandas
+pip install -e ".[semantic]"  # mmseg semantic backend
+pip install -e ".[dev]"       # notebooks
 ```
 
-### Использование модуля в коде
+Системно нужен ffmpeg/ffprobe.
 
-```python
-from src.video_processor import VideoProcessor, ImageSegmenter
+macOS:
 
-# Анализ видео
-processor = VideoProcessor('GOPR0269.MP4')
-print(processor.info)
-
-# Извлечение метаданных
-metadata = processor.extract_metadata()
-
-# Геореференцирование
-frames_df = processor.georeference_frames(
-    start_lat=55.086025,
-    start_lon=38.149033,
-    start_height=750
-)
-
-# Сегментация
-segmenter = ImageSegmenter()
-frame = processor.extract_frame(0)
-sky_mask, ground_mask = segmenter.segment_sky_ground(frame)
+```bash
+brew install ffmpeg
 ```
 
-## Примечания о GoPro метаданных
+## Docker
 
-GoPro камеры могут содержать:
-- **GPS координаты** (если включен режим GPS)
-- **Высота** (с GPS)
-- **Ориентация камеры** (IMU данные)
-- **Температура** (датчик температуры)
-- **Скорость** (при наличии GPS)
+Минимальный Docker-образ фиксирует системное и Python-окружение для CLI и smoke-проверок без локальной `.venv`:
 
-Метаданные обычно встроены в видеопоток и могут быть извлечены с помощью `ffprobe`.
+```bash
+docker compose build
+docker compose run --rm avia-geo-fusion python scripts/run_full_pipeline.py --help
+```
 
-## План дальнейшего развития
+Видео, model weights и результаты не вшиваются в образ, чтобы не раздувать его на гигабайты и не смешивать код с экспериментальными данными. В `docker-compose.yml` рабочая директория монтируется внутрь контейнера, поэтому локальные файлы вроде `data/videos/GP010269.MP4` будут доступны по тем же путям, если они есть на машине.
 
-- [ ] Реализация алгоритмов сопоставления признаков (SIFT, ORB)
-- [ ] Интеграция данных IMU и GPS
-- [ ] Создание 3D модели траектории
-- [ ] Разработка веб-интерфейса для визуализации
-- [ ] Оптимизация производительности для больших видеофайлов
-- [ ] Интеграция с дополнительными источниками спутниковых данных
+## Быстрый старт
 
-## Контакты и лицензия
+Команды ниже предполагают активированное проектное окружение:
 
-Проект разработан для целей гражданской авиации и картографирования.
+```bash
+source .venv/bin/activate
+```
 
----
+1) Проверить локальные входные артефакты:
 
-**Дата создания:** 10 декабря 2025
-**Версия:** 0.1.0
+```text
+data/videos/GP010269.MP4
+configs/camera_gopro_hx.yaml
+data/masks/anchors/index.json
+data/retrieval/db_z14.npz
+data/retrieval/db_z14.json
+```
+
+2) Быстрый component smoke для retriever + undistort + mask + BEV + matcher:
+
+```bash
+python scripts/end_to_end_smoke.py \
+  --video data/videos/GP010269.MP4 \
+  --camera-config configs/camera_gopro_hx.yaml \
+  --anchors-dir data/masks/anchors \
+  --retriever-db data/retrieval/db_z14 \
+  --output results/end_to_end
+```
+
+3) Основной integration pipeline:
+
+```bash
+python scripts/run_full_pipeline.py \
+  --video data/videos/GP010269.MP4 \
+  --camera-config configs/camera_gopro_hx.yaml \
+  --anchors-dir data/masks/anchors \
+  --retriever-db data/retrieval/db_z14 \
+  --dem data/dem/test_synthetic.tif \
+  --start-s 45 \
+  --end-s 90 \
+  --backend xfeat \
+  --snow-mask \
+  --output results/full_pipeline
+```
+
+Скрипт пишет:
+
+- `results/full_pipeline/state.csv`
+- `results/full_pipeline/trajectory.png`
+- `results/full_pipeline/scale_history.png`
+
+`state.csv` содержит состояние EKF, AGL/DEM-поля и obstruction diagnostics.
+
+Для зимнего `GP010269.MP4` `--snow-mask` включён по умолчанию: он убирает из drone-BEV яркий снег, который плохо сопоставляется с летними/осенними спутниковыми тайлами. Дополнительно можно включить sat-side class gate:
+
+```bash
+python scripts/run_full_pipeline.py ... --semantic-mask
+```
+
+4) Диагностика и component checks:
+
+```bash
+python scripts/pipeline/run_diagnostic.py --video data/videos/GP010269.MP4 --run-name smoketest
+python scripts/verify_obstruction_detector.py --video data/videos/GP010269.MP4 --output-dir results/stage1_5
+python scripts/verify_dem_lookup.py --dem data/dem/test_synthetic.tif --output results/stage2_1
+python scripts/verify_optical_flow_vo.py --camera-config configs/camera_gopro_hx.yaml
+```
+
+5) Legacy visual/HUD runners остаются полезными для ручной отладки:
+
+```bash
+python scripts/pipeline/quick_analysis.py
+python scripts/pipeline/run_rigid_experiment.py
+python scripts/pipeline/run_3d_experiment.py
+python scripts/pipeline/run_hud_video.py
+python scripts/pipeline/run_trajectory.py
+python scripts/pipeline/run_video_pipeline.py
+```
+
+## Overture dataset pipeline
+
+Сборка датасета по регионам РФ с фиксированным zoom=17:
+
+```bash
+python scripts/pipeline/run_overture_dataset_pipeline.py --config configs/overture_dataset_ru.json --stage all
+```
+
+Этапно:
+
+```bash
+python scripts/pipeline/run_overture_dataset_pipeline.py --config configs/overture_dataset_ru.json --stage download
+python scripts/pipeline/run_overture_dataset_pipeline.py --config configs/overture_dataset_ru.json --stage rasterize
+python scripts/pipeline/run_overture_dataset_pipeline.py --config configs/overture_dataset_ru.json --stage qc
+python scripts/pipeline/run_overture_dataset_pipeline.py --config configs/overture_dataset_ru.json --stage patches
+```
+
+Подробности: `docs/overture_dataset_pipeline.md`.
+
+## Recovery intrinsics (фаза 0a)
+
+```bash
+python scripts/recover_intrinsics.py \
+  --video data/videos/GP010269.MP4 \
+  --profiles configs/camera_profile_candidates_gopro_hx.yaml \
+  --output configs/camera_gopro_hx.yaml
+```
+
+Скрипт формирует:
+
+- `configs/camera_gopro_hx.yaml`
+- `results/intrinsics_recovery_report.json`
+
+## Важно про config.json
+
+`config.json` больше не является обязательным файлом проекта и не используется основным пайплайном.
+Если файл присутствует локально, это исторический артефакт старой структуры.
+
+## Git / artifacts
+
+В обычный git не добавляются:
+
+- raw video: `data/videos/GP010269.MP4`;
+- model checkpoints: `*.pth`, `*.pt`, `*.ckpt`;
+- `results/`;
+- тяжёлые regenerated Overture folders: `images/`, `masks/`, `quality_preview/`.
+
+Политика артефактов описана в `docs/artifacts.md`.
+Логическая структура модулей описана в `docs/repository_structure.md`.

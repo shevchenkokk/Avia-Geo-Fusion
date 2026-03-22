@@ -1,0 +1,49 @@
+# Mission configuration — single source of truth for fixed flight params.
+#
+# Hardcoding these in scripts grew brittle (we already ship --start-lat /
+# --start-lon defaults in three different runners). This file is the
+# canonical record. New runners should load it via a small loader rather
+# than re-define defaults.
+#
+# Fields with **REPLACE_ME** placeholders need user action — see
+# docs/dem_setup.md for DEM provisioning instructions.
+
+mission_name: gp010269_kolomna
+
+# Test video (Stage 1 baseline footage, ~11 min, no telemetry).
+video:
+  path: data/videos/GP010269.MP4
+  src_fps: 29.97
+
+# Aircraft state at frame 0. lat/lon are eyeballed from the takeoff
+# scenery; alt is the cruise reading the advisor provided. These are
+# the bootstrap values — once Stage 2 EKF is wired up they're only
+# used to seed the filter, not to feed downstream geometry every frame.
+start:
+  lat: 55.086025
+  lon: 38.149033
+  alt_msl: 750.0  # m above sea level
+
+# Camera intrinsics + extrinsics (separate file because intrinsics
+# come from a calibration pipeline of their own — Stage 0a).
+camera_config: configs/camera_gopro_hx.yaml
+
+# DEM — Stage 2.1. The lookup is source-agnostic (any GeoTIFF in
+# EPSG:4326 works), so this path is the only knob a new mission needs
+# to flip. The default below points at a synthetic test DEM generated
+# by scripts/make_test_dem.py — fine for verifying the lookup machinery,
+# but for real flight evaluation swap in an SRTM 1-arc-sec or ALOS
+# AW3D30 tile covering the mission bbox.
+dem:
+  path: data/dem/srtm_n55_e038.tif
+  # SRTM 1-arc-second tile covering 38°-39°E × 55°-56°N. Source:
+  # AWS Open Data (Mapzen mirror of NASA SRTMGL1, no auth required).
+  # Provisioning: scripts/srtm_hgt_to_geotiff.py converted the .hgt
+  # file. See docs/dem_setup.md for the full procedure.
+  # The synthetic test DEM (data/dem/test_synthetic.tif) stays in the
+  # repo as a regression check for verify_dem_lookup.py.
+  bbox:
+    west: 38.0
+    south: 55.0
+    east: 39.0
+    north: 56.0

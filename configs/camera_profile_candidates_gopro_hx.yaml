@@ -1,0 +1,48 @@
+profiles:
+  - name: gopro_hero3_black_wide_1080p_seed
+    source: seed/manual_approx
+    K:
+      - [930.0, 0.0, 960.0]
+      - [0.0, 930.0, 540.0]
+      - [0.0, 0.0, 1.0]
+    D: [-0.0400, 0.0100, -0.0040, 0.0010]
+
+  - name: gopro_hero3plus_black_wide_1080p_seed
+    source: seed/manual_approx
+    K:
+      - [920.0, 0.0, 960.0]
+      - [0.0, 920.0, 540.0]
+      - [0.0, 0.0, 1.0]
+    D: [-0.0550, 0.0170, -0.0060, 0.0010]
+
+  - name: gopro_hero4_black_wide_1080p_seed
+    source: seed/manual_approx
+    K:
+      - [905.0, 0.0, 960.0]
+      - [0.0, 905.0, 540.0]
+      - [0.0, 0.0, 1.0]
+    D: [-0.0700, 0.0240, -0.0080, 0.0012]
+
+  - name: gopro_hero3_black_medium_1080p_seed
+    source: seed/manual_approx
+    K:
+      - [1120.0, 0.0, 960.0]
+      - [0.0, 1120.0, 540.0]
+      - [0.0, 0.0, 1.0]
+    D: [-0.0320, 0.0090, -0.0030, 0.0006]
+
+  - name: gopro_hero3plus_black_medium_1080p_seed
+    source: seed/manual_approx
+    K:
+      - [1110.0, 0.0, 960.0]
+      - [0.0, 1110.0, 540.0]
+      - [0.0, 0.0, 1.0]
+    D: [-0.0380, 0.0110, -0.0040, 0.0008]
+
+  - name: gopro_hero4_black_medium_1080p_seed
+    source: seed/manual_approx
+    K:
+      - [1090.0, 0.0, 960.0]
+      - [0.0, 1090.0, 540.0]
+      - [0.0, 0.0, 1.0]
+    D: [-0.0440, 0.0140, -0.0050, 0.0009]

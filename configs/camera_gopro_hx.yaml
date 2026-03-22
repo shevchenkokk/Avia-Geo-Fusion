@@ -1,0 +1,133 @@
+lens_model: fisheye
+image_size:
+- 1920
+- 1080
+# Stage 3.2: pitch grid (scripts/calibrate_pitch.py) on GP010269
+# cruise window 45-89s converged at -30°: median 6 inliers, accept
+# rate 22% (5/23) — best of {-50,-40,-30,-20,-10}. Used by all
+# downstream BEV rectification and OF-VO ray casting.
+pitch_deg: -30.0
+selected_profile: gopro_hero4_black_medium_1080p_seed
+lens_profile_source: seed/manual_approx
+recovery_confidence: 0.758713
+selection_margin: 0.065413
+ambiguous: false
+K:
+- - 1090.0
+  - 0.0
+  - 960.0
+- - 0.0
+  - 1090.0
+  - 540.0
+- - 0.0
+  - 0.0
+  - 1.0
+K_rectified:
+- - 987.223981
+  - 0.0
+  - 960.0
+- - 0.0
+  - 987.223981
+  - 540.0
+- - 0.0
+  - 0.0
+  - 1.0
+D:
+- -0.044
+- 0.014
+- -0.005
+- 0.0009
+recovery_utc: '2026-04-24T20:02:53.242269+00:00'
+score_table:
+- name: gopro_hero4_black_medium_1080p_seed
+  source: seed/manual_approx
+  aggregate_score: 848.316038
+  mean_valid_score: 892.37716
+  quality_gate: 0.950625
+  fallback_ratio: 0.025
+  mean_rmse_valid: 1.162512
+  mean_line_count: 122.525
+  frame_count_used: 40
+  valid_frame_count: 39
+  median_residual_px: 0.198334
+  mean_cheirality_rate: 0.391551
+- name: gopro_hero3_black_medium_1080p_seed
+  source: seed/manual_approx
+  aggregate_score: 849.610598
+  mean_valid_score: 893.738959
+  quality_gate: 0.950625
+  fallback_ratio: 0.025
+  mean_rmse_valid: 1.149318
+  mean_line_count: 122.6
+  frame_count_used: 40
+  valid_frame_count: 39
+  median_residual_px: 0.211308
+  mean_cheirality_rate: 0.535518
+- name: gopro_hero3plus_black_medium_1080p_seed
+  source: seed/manual_approx
+  aggregate_score: 817.810506
+  mean_valid_score: 906.161225
+  quality_gate: 0.9025
+  fallback_ratio: 0.05
+  mean_rmse_valid: 1.188777
+  mean_line_count: 122.425
+  frame_count_used: 40
+  valid_frame_count: 38
+  median_residual_px: 0.209699
+  mean_cheirality_rate: 0.408291
+- name: gopro_hero3_black_wide_1080p_seed
+  source: seed/manual_approx
+  aggregate_score: 810.182209
+  mean_valid_score: 897.708819
+  quality_gate: 0.9025
+  fallback_ratio: 0.05
+  mean_rmse_valid: 1.173905
+  mean_line_count: 122.8
+  frame_count_used: 40
+  valid_frame_count: 38
+  median_residual_px: 0.214313
+  mean_cheirality_rate: 0.458807
+- name: gopro_hero3plus_black_wide_1080p_seed
+  source: seed/manual_approx
+  aggregate_score: 789.73885
+  mean_valid_score: 922.996464
+  quality_gate: 0.855625
+  fallback_ratio: 0.075
+  mean_rmse_valid: 1.189566
+  mean_line_count: 122.7
+  frame_count_used: 40
+  valid_frame_count: 37
+  median_residual_px: 0.214977
+  mean_cheirality_rate: 0.388896
+- name: gopro_hero4_black_wide_1080p_seed
+  source: seed/manual_approx
+  aggregate_score: 774.357321
+  mean_valid_score: 905.019514
+  quality_gate: 0.855625
+  fallback_ratio: 0.075
+  mean_rmse_valid: 1.200534
+  mean_line_count: 122.025
+  frame_count_used: 40
+  valid_frame_count: 37
+  median_residual_px: 0.219365
+  mean_cheirality_rate: 0.481971
+alternate_profile:
+  name: gopro_hero3_black_medium_1080p_seed
+  source: seed/manual_approx
+  aggregate_score: 849.610598
+tiebreaker:
+  method: quality_gate_filter_then_min_residual
+  quality_gate_floor: 0.95
+  rejected_by_gate:
+  - gopro_hero3plus_black_medium_1080p_seed
+  - gopro_hero3_black_wide_1080p_seed
+  - gopro_hero3plus_black_wide_1080p_seed
+  - gopro_hero4_black_wide_1080p_seed
+  considered:
+  - gopro_hero4_black_medium_1080p_seed
+  - gopro_hero3_black_medium_1080p_seed
+  winner: gopro_hero4_black_medium_1080p_seed
+  residual_margin: 0.06541329521178374
+  winner_residual_px: 0.19833438253319668
+  runner_up: gopro_hero3_black_medium_1080p_seed
+  runner_up_residual_px: 0.21130808804848752

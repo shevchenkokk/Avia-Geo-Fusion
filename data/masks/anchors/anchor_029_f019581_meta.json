@@ -1,0 +1,53 @@
+{
+  "anchor_index": 29,
+  "frame_index": 19581,
+  "timestamp_seconds": 653.3527,
+  "image_size": [
+    1920,
+    1080
+  ],
+  "mask_coverage": 0.07918113425925925,
+  "num_accepted_instances": 1,
+  "needs_review": false,
+  "detections": [
+    {
+      "prompt": "plane",
+      "instances": [],
+      "num_accepted": 0
+    },
+    {
+      "prompt": "aircraft skin",
+      "instances": [],
+      "num_accepted": 0
+    },
+    {
+      "prompt": "metal panel",
+      "instances": [
+        {
+          "index": 0,
+          "score": 0.5652725100517273,
+          "box": [
+            -1.415112018585205,
+            0.05127310752868652,
+            155.86080932617188,
+            1075.8182373046875
+          ],
+          "cx_frac": 0.0402202336738507,
+          "accepted": true
+        }
+      ],
+      "num_accepted": 1
+    },
+    {
+      "prompt": "landing gear",
+      "instances": [],
+      "num_accepted": 0
+    },
+    {
+      "prompt": "wing strut",
+      "instances": [],
+      "num_accepted": 0
+    }
+  ],
+  "camera_profile": "gopro_hero4_black_medium_1080p_seed"
+}

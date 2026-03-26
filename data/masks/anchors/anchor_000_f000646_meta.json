@@ -1,0 +1,92 @@
+{
+  "anchor_index": 0,
+  "frame_index": 646,
+  "timestamp_seconds": 21.554866666666666,
+  "image_size": [
+    1920,
+    1080
+  ],
+  "mask_coverage": 0.08822723765432099,
+  "num_accepted_instances": 4,
+  "needs_review": false,
+  "detections": [
+    {
+      "prompt": "plane",
+      "instances": [
+        {
+          "index": 0,
+          "score": 0.9197625517845154,
+          "box": [
+            3.2654714584350586,
+            0.6922352313995361,
+            245.3907470703125,
+            1074.998291015625
+          ],
+          "cx_frac": 0.06475422357519468,
+          "accepted": true
+        }
+      ],
+      "num_accepted": 1
+    },
+    {
+      "prompt": "aircraft skin",
+      "instances": [
+        {
+          "index": 0,
+          "score": 0.9065432548522949,
+          "box": [
+            -0.3274083137512207,
+            -1.0848140716552734,
+            142.07579040527344,
+            1075.8499755859375
+          ],
+          "cx_frac": 0.03691364116966724,
+          "accepted": true
+        }
+      ],
+      "num_accepted": 1
+    },
+    {
+      "prompt": "metal panel",
+      "instances": [
+        {
+          "index": 0,
+          "score": 0.6377447843551636,
+          "box": [
+            -1.073763370513916,
+            -0.5201983451843262,
+            138.5867156982422,
+            1076.421875
+          ],
+          "cx_frac": 0.035810664668679236,
+          "accepted": true
+        }
+      ],
+      "num_accepted": 1
+    },
+    {
+      "prompt": "landing gear",
+      "instances": [
+        {
+          "index": 0,
+          "score": 0.8613565564155579,
+          "box": [
+            118.39299774169922,
+            471.90087890625,
+            244.35670471191406,
+            744.8185424804688
+          ],
+          "cx_frac": 0.09446606834729512,
+          "accepted": true
+        }
+      ],
+      "num_accepted": 1
+    },
+    {
+      "prompt": "wing strut",
+      "instances": [],
+      "num_accepted": 0
+    }
+  ],
+  "camera_profile": "gopro_hero4_black_medium_1080p_seed"
+}

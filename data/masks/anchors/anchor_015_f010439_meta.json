@@ -1,0 +1,117 @@
+{
+  "anchor_index": 15,
+  "frame_index": 10439,
+  "timestamp_seconds": 348.31463333333335,
+  "image_size": [
+    1920,
+    1080
+  ],
+  "mask_coverage": 0.08880015432098766,
+  "num_accepted_instances": 6,
+  "needs_review": false,
+  "detections": [
+    {
+      "prompt": "plane",
+      "instances": [
+        {
+          "index": 0,
+          "score": 0.3457036018371582,
+          "box": [
+            118.60340118408203,
+            468.8551025390625,
+            245.7446746826172,
+            744.7092895507812
+          ],
+          "cx_frac": 0.0948823114236196,
+          "accepted": true
+        },
+        {
+          "index": 1,
+          "score": 0.7646582126617432,
+          "box": [
+            2.672567367553711,
+            0.7705128192901611,
+            244.34568786621094,
+            1074.1092529296875
+          ],
+          "cx_frac": 0.06432767063379288,
+          "accepted": true
+        }
+      ],
+      "num_accepted": 2
+    },
+    {
+      "prompt": "aircraft skin",
+      "instances": [
+        {
+          "index": 0,
+          "score": 0.8839712738990784,
+          "box": [
+            -0.35787105560302734,
+            -0.5230629444122314,
+            144.5659942626953,
+            1075.530029296875
+          ],
+          "cx_frac": 0.03755419875184695,
+          "accepted": true
+        }
+      ],
+      "num_accepted": 1
+    },
+    {
+      "prompt": "metal panel",
+      "instances": [
+        {
+          "index": 0,
+          "score": 0.7373782396316528,
+          "box": [
+            -0.9095406532287598,
+            -1.0936975479125977,
+            141.78118896484375,
+            1075.3475341796875
+          ],
+          "cx_frac": 0.03668532508114974,
+          "accepted": true
+        }
+      ],
+      "num_accepted": 1
+    },
+    {
+      "prompt": "landing gear",
+      "instances": [
+        {
+          "index": 0,
+          "score": 0.9066230654716492,
+          "box": [
+            119.79875183105469,
+            470.2352294921875,
+            245.86744689941406,
+            743.3888549804688
+          ],
+          "cx_frac": 0.09522557258605957,
+          "accepted": true
+        }
+      ],
+      "num_accepted": 1
+    },
+    {
+      "prompt": "wing strut",
+      "instances": [
+        {
+          "index": 0,
+          "score": 0.3504812717437744,
+          "box": [
+            -0.18945693969726562,
+            0.026972293853759766,
+            144.21714782714844,
+            1075.05810546875
+          ],
+          "cx_frac": 0.03750721116860708,
+          "accepted": true
+        }
+      ],
+      "num_accepted": 1
+    }
+  ],
+  "camera_profile": "gopro_hero4_black_medium_1080p_seed"
+}

@@ -1,0 +1,10 @@
+{
+  "train_regions": [
+    "moscow_city_small"
+  ],
+  "val_regions": [],
+  "test_regions": [],
+  "patch_size": 512,
+  "selection_strategy": "rare-classes-boost",
+  "used_clean_meta": true
+}

@@ -1,0 +1,50 @@
+{
+  "train": [
+    {
+      "name": "RandomBrightnessContrast",
+      "p": 0.5,
+      "brightness_limit": 0.2,
+      "contrast_limit": 0.2
+    },
+    {
+      "name": "HueSaturationValue",
+      "p": 0.4,
+      "hue_shift_limit": 10,
+      "sat_shift_limit": 20,
+      "val_shift_limit": 10
+    },
+    {
+      "name": "RandomFog",
+      "p": 0.15,
+      "fog_coef_lower": 0.05,
+      "fog_coef_upper": 0.25
+    },
+    {
+      "name": "MotionBlur",
+      "p": 0.2,
+      "blur_limit": 5
+    },
+    {
+      "name": "RandomShadow",
+      "p": 0.2
+    },
+    {
+      "name": "HorizontalFlip",
+      "p": 0.5
+    },
+    {
+      "name": "VerticalFlip",
+      "p": 0.1
+    },
+    {
+      "name": "RandomRotate90",
+      "p": 0.3
+    }
+  ],
+  "val": [
+    {
+      "name": "NoOp"
+    }
+  ],
+  "notes": "Погодно-сезонные и цветовые аугментации для повышения устойчивости к съемке с БПЛА."
+}

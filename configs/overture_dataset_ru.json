@@ -1,0 +1,144 @@
+{
+  "dataset_root": "data/overture_ru_dataset",
+  "zoom": 17,
+  "tile_size": 256,
+  "http_timeout_sec": 20,
+  "tile_source": {
+    "name": "Google Satellite",
+    "url_template": "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+    "user_agent": "Mozilla/5.0 (Avia-Geo-Fusion)"
+  },
+  "regions": [
+    {
+      "id": "moscow_city",
+      "name": "Москва (крупный город)",
+      "bbox": [37.45, 55.66, 37.78, 55.86],
+      "region_type": "city"
+    },
+    {
+      "id": "moscow_suburb",
+      "name": "Московская область (пригород)",
+      "bbox": [37.55, 55.78, 38.05, 56.05],
+      "region_type": "suburb"
+    },
+    {
+      "id": "spb_city_water",
+      "name": "Санкт-Петербург (город + вода)",
+      "bbox": [29.75, 59.8, 30.65, 60.2],
+      "region_type": "city_water"
+    },
+    {
+      "id": "karelia_forest_lakes",
+      "name": "Карелия (лес + озера)",
+      "bbox": [30.1, 61.4, 31.2, 62.1],
+      "region_type": "forest_water"
+    },
+    {
+      "id": "krasnodar_fields",
+      "name": "Краснодарский край (поля)",
+      "bbox": [38.3, 45.0, 39.6, 46.0],
+      "region_type": "fields"
+    },
+    {
+      "id": "rostov_steppe",
+      "name": "Ростовская область (открытая земля)",
+      "bbox": [39.8, 47.0, 40.9, 47.9],
+      "region_type": "open_land"
+    },
+    {
+      "id": "sochi_airport",
+      "name": "Сочи/Адлер (аэропорт)",
+      "bbox": [39.85, 43.35, 40.05, 43.5],
+      "region_type": "airport"
+    },
+    {
+      "id": "svo_airport",
+      "name": "Шереметьево (аэропорт)",
+      "bbox": [37.35, 55.9, 37.5, 56.02],
+      "region_type": "airport"
+    }
+  ],
+  "overture_layers": [
+    {
+      "name": "water",
+      "description": "Водоемы"
+    },
+    {
+      "name": "land_cover",
+      "description": "Покров поверхности"
+    },
+    {
+      "name": "land_use",
+      "description": "Землепользование"
+    },
+    {
+      "name": "buildings",
+      "description": "Здания"
+    },
+    {
+      "name": "transportation",
+      "description": "Дороги, ВПП, РД"
+    }
+  ],
+  "class_names": {
+    "0": "background",
+    "1": "water",
+    "2": "vegetation",
+    "3": "buildings",
+    "4": "roads_runway_taxiway"
+  },
+  "class_mapping": {
+    "water.class:river": 1,
+    "water.class:lake": 1,
+    "water.class:ocean": 1,
+    "water.class:sea": 1,
+
+    "land_cover:forest": 2,
+    "land_cover:grass": 2,
+    "land_cover:shrub": 2,
+    "land_cover:crop": 2,
+    "land_use:park": 2,
+    "land_use:grass": 2,
+    "land_use:farmland": 2,
+    "land_use:agriculture": 2,
+    "land_use:horticulture": 2,
+    "land_use:meadow": 2,
+    "land_use:grassland": 2,
+
+    "buildings:*": 3,
+
+    "transportation:road": 4,
+    "transportation:water": 0,
+    "transportation:rail": 0,
+    "transportation.class:subway": 0,
+    "transportation.class:tram": 0,
+    "transportation.class:standard_gauge": 0,
+    "transportation.class:funicular": 0,
+    "transportation.class:steps": 0,
+    "transportation:trunk": 4,
+    "transportation:motorway": 4,
+    "transportation:primary": 4,
+    "transportation:secondary": 4,
+    "transportation:tertiary": 4,
+    "transportation:residential": 4,
+    "transportation:unclassified": 4,
+    "transportation:living_street": 4,
+    "transportation:track": 4,
+    "transportation:path": 4,
+    "transportation:driveway": 4,
+    "transportation:parking_aisle": 4,
+    "transportation:service": 4,
+    "transportation:pedestrian": 4,
+    "transportation:runway": 4,
+    "transportation:taxiway": 4,
+    "transportation:*": 4
+  },
+  "raster_priority": [4, 3, 1, 2, 0],
+  "overture_download_commands": {
+    "water": "{overture_cli} download --bbox {min_lon},{min_lat},{max_lon},{max_lat} -t water -f geoparquet -o {output}",
+    "land_cover": "{overture_cli} download --bbox {min_lon},{min_lat},{max_lon},{max_lat} -t land_cover -f geoparquet -o {output}",
+    "land_use": "{overture_cli} download --bbox {min_lon},{min_lat},{max_lon},{max_lat} -t land_use -f geoparquet -o {output}",
+    "buildings": "{overture_cli} download --bbox {min_lon},{min_lat},{max_lon},{max_lat} -t building -f geoparquet -o {output}",
+    "transportation": "{overture_cli} download --bbox {min_lon},{min_lat},{max_lon},{max_lat} -t segment -f geoparquet -o {output}"
+  }
+}

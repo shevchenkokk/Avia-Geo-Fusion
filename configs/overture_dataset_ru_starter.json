@@ -1,0 +1,132 @@
+{
+  "dataset_root": "data/overture_ru_dataset_starter",
+  "zoom": 17,
+  "tile_size": 256,
+  "http_timeout_sec": 20,
+  "tile_source": {
+    "name": "Google Satellite",
+    "url_template": "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+    "user_agent": "Mozilla/5.0 (Avia-Geo-Fusion)"
+  },
+  "regions": [
+    {
+      "id": "moscow_city_small",
+      "name": "Москва (крупный город, небольшой AOI)",
+      "bbox": [37.58, 55.72, 37.64, 55.77],
+      "region_type": "city"
+    },
+    {
+      "id": "moscow_suburb_small",
+      "name": "Подмосковье (пригород, небольшой AOI)",
+      "bbox": [37.79, 55.90, 37.86, 55.96],
+      "region_type": "suburb"
+    },
+    {
+      "id": "karelia_forest_small",
+      "name": "Карелия (лес + озера, небольшой AOI)",
+      "bbox": [30.67, 61.76, 30.75, 61.82],
+      "region_type": "forest_water"
+    },
+    {
+      "id": "krasnodar_fields_small",
+      "name": "Краснодарский край (поля, небольшой AOI)",
+      "bbox": [38.76, 45.66, 38.84, 45.72],
+      "region_type": "fields"
+    },
+    {
+      "id": "rostov_open_small",
+      "name": "Ростовская область (открытая земля, небольшой AOI)",
+      "bbox": [40.25, 47.22, 40.33, 47.28],
+      "region_type": "open_land"
+    },
+    {
+      "id": "svo_airport_small",
+      "name": "Шереметьево (аэропорт/ВПП, небольшой AOI)",
+      "bbox": [37.39, 55.95, 37.46, 56.00],
+      "region_type": "airport"
+    }
+  ],
+  "overture_layers": [
+    {
+      "name": "water",
+      "description": "Водоемы"
+    },
+    {
+      "name": "land_cover",
+      "description": "Покров поверхности"
+    },
+    {
+      "name": "land_use",
+      "description": "Землепользование"
+    },
+    {
+      "name": "buildings",
+      "description": "Здания"
+    },
+    {
+      "name": "transportation",
+      "description": "Дороги, ВПП, РД"
+    }
+  ],
+  "class_names": {
+    "0": "background",
+    "1": "water",
+    "2": "vegetation",
+    "3": "buildings",
+    "4": "roads_runway_taxiway"
+  },
+  "class_mapping": {
+    "water.class:river": 1,
+    "water.class:lake": 1,
+    "water.class:ocean": 1,
+    "water.class:sea": 1,
+
+    "land_cover:forest": 2,
+    "land_cover:grass": 2,
+    "land_cover:shrub": 2,
+    "land_cover:crop": 2,
+    "land_use:park": 2,
+    "land_use:grass": 2,
+    "land_use:farmland": 2,
+    "land_use:agriculture": 2,
+    "land_use:horticulture": 2,
+    "land_use:meadow": 2,
+    "land_use:grassland": 2,
+
+    "buildings:*": 3,
+
+    "transportation:road": 4,
+    "transportation:water": 0,
+    "transportation:rail": 0,
+    "transportation.class:subway": 0,
+    "transportation.class:tram": 0,
+    "transportation.class:standard_gauge": 0,
+    "transportation.class:funicular": 0,
+    "transportation.class:steps": 0,
+    "transportation:trunk": 4,
+    "transportation:motorway": 4,
+    "transportation:primary": 4,
+    "transportation:secondary": 4,
+    "transportation:tertiary": 4,
+    "transportation:residential": 4,
+    "transportation:unclassified": 4,
+    "transportation:living_street": 4,
+    "transportation:track": 4,
+    "transportation:path": 4,
+    "transportation:driveway": 4,
+    "transportation:parking_aisle": 4,
+    "transportation:service": 4,
+    "transportation:pedestrian": 4,
+    "transportation:runway": 4,
+    "transportation:taxiway": 4,
+    "transportation:*": 4
+  },
+  "raster_priority": [4, 3, 1, 2, 0],
+  "overture_download_commands": {
+    "water": "{overture_cli} download --bbox {min_lon},{min_lat},{max_lon},{max_lat} -t water -f geoparquet -o {output}",
+    "land_cover": "{overture_cli} download --bbox {min_lon},{min_lat},{max_lon},{max_lat} -t land_cover -f geoparquet -o {output}",
+    "land_use": "{overture_cli} download --bbox {min_lon},{min_lat},{max_lon},{max_lat} -t land_use -f geoparquet -o {output}",
+    "buildings": "{overture_cli} download --bbox {min_lon},{min_lat},{max_lon},{max_lat} -t building -f geoparquet -o {output}",
+    "transportation": "{overture_cli} download --bbox {min_lon},{min_lat},{max_lon},{max_lat} -t segment -f geoparquet -o {output}"
+  }
+}

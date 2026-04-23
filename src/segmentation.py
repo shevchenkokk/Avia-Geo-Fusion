@@ -20,7 +20,10 @@ class SkySegmenter:
         Определяет линию горизонта и закрашивает все, что выше (небо) черным цветом,
         чтобы алгоритмы (LoFTR/SIFT) не искали там ключевые точки.
         """
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        if len(frame.shape) == 2:
+            gray = frame
+        else:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
         # 1. Применяем детектор границ (Canny)
         edges = cv2.Canny(gray, self.canny_low, self.canny_high)

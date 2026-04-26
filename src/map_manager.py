@@ -2,10 +2,10 @@
 Модуль управления динамической картой — MapManager.
 
 Реализует концепцию «скользящего окна» (Sliding Window Map), описанную в работах
-по навигации БПЛА (Chen et al., Yao et al., MMVL):
+по навигации самолёта (Chen et al., Yao et al., MMVL):
 
-    - Память хранит только тайлы вокруг текущей позиции дрона (±window_radius тайлов).
-    - Когда дрон приближается к границе окна (closer_threshold тайлов до края),
+    - Память хранит только тайлы вокруг текущей позиции самолета (±window_radius тайлов).
+    - Когда самолет приближается к границе окна (closer_threshold тайлов до края),
       центр окна сдвигается к новой позиции, новые тайлы подгружаются,
       а вышедшие из зоны видимости тайлы выгружаются (eviction) из кэша.
     - Весь глобальный набор тайлов (вся страна) никогда не загружается в RAM.
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 class MapManager:
     """
     Менеджер карты со скользящим окном.
-    Принимает обновление GPS-позиции дрона и автоматически поддерживает
+    Принимает обновление GPS-позиции самолета и автоматически поддерживает
     актуальную склеенную спутниковую карту в памяти.
     """
 
@@ -65,12 +65,12 @@ class MapManager:
         self._initialized = False
 
     # ------------------------------------------------------------------
-    # Public API
+    # Публичный API
     # ------------------------------------------------------------------
 
     def initialize(self, lat: float, lon: float) -> Tuple[np.ndarray, Tuple]:
         """
-        Первоначальная загрузка окна карты вокруг стартовой позиции дрона.
+        Первоначальная загрузка окна карты вокруг стартовой позиции самолета.
         Вызывать один раз до входа в основной цикл обработки видео.
         """
         center = mercantile.tile(lon, lat, self.zoom)
@@ -85,8 +85,8 @@ class MapManager:
 
     def update(self, lat: float, lon: float) -> Tuple[np.ndarray, Tuple]:
         """
-        Обновление карты по текущей GPS-оценке дрона (из Фильтра Калмана).
-        Если дрон приближается к краю окна — сдвигаем центр и подгружаем новые тайлы.
+        Обновление карты по текущей GPS-оценке самолета (из Фильтра Калмана).
+        Если самолет приближается к краю окна — сдвигаем центр и подгружаем новые тайлы.
         Вызывать каждый кадр / раз в n кадров.
 
         :return: (current_map_cv2, current_bbox) — актуальная карта и её bbox
@@ -94,19 +94,19 @@ class MapManager:
         if not self._initialized:
             return self.initialize(lat, lon)
 
-        drone_tile = mercantile.tile(lon, lat, self.zoom)
-        dx = abs(drone_tile.x - self.center_tx)
-        dy = abs(drone_tile.y - self.center_ty)
+        plane_tile = mercantile.tile(lon, lat, self.zoom)
+        dx = abs(plane_tile.x - self.center_tx)
+        dy = abs(plane_tile.y - self.center_ty)
 
-        # Порог сдвига: если дрон оказался ближе к краю чем closer_threshold тайлов
+        # Порог сдвига: если самолет оказался ближе к краю чем closer_threshold тайлов
         trigger = self.window_radius - self.closer_threshold
         if dx > trigger or dy > trigger:
             logger.info(
-                f"[MapManager] Дрон у края окна (dx={dx}, dy={dy}) → сдвиг центра "
-                f"к tile({drone_tile.x}, {drone_tile.y})"
+                f"[MapManager] Самолет у края окна (dx={dx}, dy={dy}) → сдвиг центра "
+                f"к tile({plane_tile.x}, {plane_tile.y})"
             )
-            self.center_tx = drone_tile.x
-            self.center_ty = drone_tile.y
+            self.center_tx = plane_tile.x
+            self.center_ty = plane_tile.y
             self._load_window()
             self._stitch()
 
@@ -119,7 +119,7 @@ class MapManager:
         return n * 256, n * 256
 
     # ------------------------------------------------------------------
-    # Internal helpers
+    # Внутренние методы
     # ------------------------------------------------------------------
 
     def _load_window(self):
@@ -131,21 +131,29 @@ class MapManager:
             for dy in range(-r, r + 1)
         }
 
-        # Evict (выгрузить) тайлы вышедшие за пределы нового окна
+        # 1. Evict (выгрузить) тайлы вышедшие за пределы нового окна
         evicted = 0
         for key in list(self._tile_cache.keys()):
             if key not in needed:
                 del self._tile_cache[key]
                 evicted += 1
 
-        # Загрузить отсутствующие новые тайлы
-        loaded = 0
+        # 2. Собираем список только тех тайлов, которых нет в кэше
+        tiles_to_download = []
         for (tx, ty) in needed:
             if (tx, ty) not in self._tile_cache:
-                img = self.loader.download_tile(tx, ty, self.zoom)
-                if img is not None:
-                    self._tile_cache[(tx, ty)] = img
-                    loaded += 1
+                tiles_to_download.append((tx, ty, self.zoom))
+
+        # 3. Загружаем отсутствующие новые тайлы
+        loaded = 0
+        if tiles_to_download:
+            logger.info(f"[MapManager] Требуется загрузить {len(tiles_to_download)} новых тайлов.")
+            # Параллельная загрузка тайлов
+            downloaded_tiles = self.loader.download_tiles_parallel(tiles_to_download)
+            # 4. Добавляем скачанное в кэш
+            for (tx, ty, z), img in downloaded_tiles.items():
+                self._tile_cache[(tx, ty)] = img
+                loaded += 1
 
         logger.info(f"[MapManager] Загружено новых тайлов: {loaded}, выгружено: {evicted},"
                     f" в кэше: {len(self._tile_cache)}")

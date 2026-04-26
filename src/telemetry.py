@@ -17,7 +17,7 @@ class GeoPosition:
     latitude: float
     longitude: float
     altitude: Optional[float] = None
-    heading: Optional[float] = None  # yaw
+    heading: Optional[float] = None
     pitch: Optional[float] = None
     roll: Optional[float] = None
 

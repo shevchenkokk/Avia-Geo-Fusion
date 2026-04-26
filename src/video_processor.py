@@ -55,7 +55,7 @@ class VideoProcessor:
         
         Args:
             video_path: путь к видеофайлу
-            default_geo: (lat, lon, alt) - стартовые координаты БПЛА для фоллбэка, если телеметрии в кадрах нет.
+            default_geo: (lat, lon, alt) - стартовые координаты самолёта для фоллбэка, если телеметрии в кадрах нет.
         """
         self.video_path = Path(video_path)
         self.info = self._analyze_video()

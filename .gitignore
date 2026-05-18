@@ -31,6 +31,8 @@ logs/
 
 # Docs
 docs/predefense_presentation_plan.md
+docs/phase4_segmentation_findings.md
+docs/figures/phase4/*.md
 vkr_hse/
 texput.log
 PROJECT_PLAN.md

@@ -31,6 +31,9 @@ logs/
 
 # Docs
 docs/predefense_presentation_plan.md
+vkr_hse/
+texput.log
+PROJECT_PLAN.md
 
 # Data policy: keep only small reproducibility artifacts in git.
 data/*
@@ -43,14 +46,19 @@ data/masks/*
 !data/masks/anchors/
 !data/masks/anchors/**
 !data/retrieval/
+data/retrieval/*
 !data/retrieval/db_z14.json
 !data/retrieval/db_z14.npz
+!data/ground_truth/
+data/ground_truth/*
+!data/ground_truth/*.example.json
 !data/overture_ru_dataset_starter/
 data/overture_ru_dataset_starter/*
 !data/overture_ru_dataset_starter/*.json
 !data/overture_ru_dataset_starter/*.csv
 !data/overture_ru_dataset_starter/vectors/
 !data/overture_ru_dataset_starter/vectors/**
+data/overture_ru_dataset_starter/vectors/**/*.parquet
 data/overture_ru_dataset_starter/vectors/**/*.state
 
 # Heavy regenerated Overture products.

@@ -17,7 +17,7 @@ from typing import Tuple, List, Optional, Any, Dict
 logger = logging.getLogger(__name__)
 
 class Geolocator:
-    # Пороги принятия Stage 1.4 (PROJECT_PLAN.md §1.4). Настраиваются через kwargs __init__.
+    # Пороги принятия этапа 1.4 (PROJECT_PLAN.md §1.4). Настраиваются через kwargs __init__.
     DEFAULT_MIN_INLIERS = 8
     DEFAULT_MIN_INLIER_RATIO = 0.15
     DEFAULT_MAX_SCALE_CHANGE = 1.5
@@ -57,7 +57,7 @@ class Geolocator:
         self.last_raw_gps: Optional[Tuple[float, float, float]] = None
         self.last_homography_scale: Optional[float] = None
 
-        # Stage 1.1 diagnostics: всегда содержит данные о последнем кадре,
+        # Диагностика этапа 1.1: всегда содержит данные о последнем кадре,
         # даже если estimate_center_gps вернула None.
         self.last_diagnostics: Dict[str, Any] = {}
 
@@ -185,7 +185,7 @@ class Geolocator:
             "homography": H,
         })
 
-        # Stage 1.4: отбрасываем «мусорные» локи по трём критериям:
+        # Этап 1.4: отбрасываем «мусорные» фиксации по трём критериям:
         # (a) мало inliers — низкая статистическая поддержка,
         # (b) низкий inlier_ratio — RANSAC вытащил капли из шума (залипание на ложный регион),
         # (c) скачок масштаба гомографии >1.5× — матчер переключился на другой регион тайла.
@@ -282,7 +282,7 @@ class Geolocator:
         return self.trajectory_gps
 
     def predict_only(self) -> Optional[Tuple[float, float]]:
-        """Счисление пути (Stage 1.3): шаг Калмана без измерения.
+        """Счисление пути (этап 1.3): шаг Калмана без измерения.
 
         Применяется на кадрах, где ``estimate_center_gps`` отказал,
         чтобы поиск следующего тайла следовал предсказанной траектории.

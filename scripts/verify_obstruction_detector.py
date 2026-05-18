@@ -1,23 +1,23 @@
-"""Stage 1.5 verification: run the obstruction detector across the
-cloud-immersion segment of GP010269.MP4 and check the §1.5 criterion.
+"""Проверка этапа 1.5: прогнать obstruction detector по участку перекрытия
+кадра в GP010269.MP4 и проверить критерий §1.5.
 
-Criterion (PROJECT_PLAN.md §1.5): "on segment t=280-360, the detector
-triggers within 1-2 s of cloud entry, and clears within 1-2 s of cloud
-exit. The system makes no false map-fix during the segment."
+Критерий из PROJECT_PLAN.md §1.5: «на участке t=280-360 detector срабатывает
+в течение 1-2 с после входа в облако и очищается в течение 1-2 с после выхода.
+Система не делает ложных map-fix во время участка».
 
-This script does the *detector half* of the criterion. It produces:
+Этот скрипт проверяет *половину критерия*, относящуюся к detector. Выходы:
   - results/stage1_5/metrics.csv   per-frame metrics + flags
   - results/stage1_5/metrics.png   4-panel time series with cloud band
   - results/stage1_5/contact.png   thumbnail strip of representative frames
   - results/stage1_5/summary.txt   ground-truth labelling + lag report
 
-Cloud segment ground truth is configurable via CLI: defaults are
-``--cloud-enter 295`` / ``--cloud-exit 358``. They were eyeballed from
-the video (raw GoPro footage, no telemetry); refine if needed.
+Ground truth для участка облака задаётся через CLI: по умолчанию
+``--cloud-enter 295`` / ``--cloud-exit 358``. Значения оценены глазами по
+сырому GoPro-видео без телеметрии; при необходимости их можно уточнить.
 
-The "no false map-fix" half of the criterion is verified separately
-when the detector is wired into ``run_diagnostic.py`` — that's a
-follow-up step after this script passes.
+Часть критерия про «no false map-fix» проверяется отдельно, когда detector
+подключён в ``run_diagnostic.py``. Это следующий шаг после прохождения этого
+скрипта.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.aircraft_mask import AircraftMaskTracker
+from src.aircraft_mask import load_aircraft_mask_tracker_for_video
 from src.obstruction_detector import ObstructionDetector
 from src.video_processor import VideoProcessor
 
@@ -42,10 +42,10 @@ from src.video_processor import VideoProcessor
 def _detect_lag(
     times: np.ndarray, flags: np.ndarray, t_event: float, rising: bool
 ) -> float | None:
-    """Find first time after ``t_event`` where ``flags`` matches expectation.
+    """Найти первое время после ``t_event``, где ``flags`` совпадает с ожиданием.
 
-    rising=True: look for first True after t_event (cloud entry detected).
-    rising=False: look for first False after t_event (cloud exit detected).
+    rising=True: ищем первый True после t_event — обнаружен вход в облако.
+    rising=False: ищем первый False после t_event — обнаружен выход из облака.
     """
     target = True if rising else False
     after = times >= t_event
@@ -59,24 +59,23 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--video", type=Path, default=Path("data/videos/GP010269.MP4"))
     p.add_argument("--anchors-dir", type=Path, default=Path("data/masks/anchors"))
-    # The actual obstruction in GP010269.MP4 is the frost-on-lens segment
-    # at t=15-40 s (the plan also mentions this: "t≈10s в нашем видео
-    # показывает классический пример с инеем на линзе"). The supposed
-    # full-cloud immersion at t≈300 s in the plan does NOT match this
-    # footage — std stays ~25-30 there, which is featureless terrain,
-    # not real obstruction. So the §1.5 criterion is verified against
-    # the frost event; for full-cloud the threshold tuning carries over.
+    # Реальное перекрытие в GP010269.MP4 — это участок инея на линзе t=15-40 с
+    # (план тоже упоминает: "t≈10s в нашем видео показывает классический пример
+    # с инеем на линзе"). Предполагаемое полное погружение в облако около t≈300 с
+    # не соответствует этому видео: std там держится ~25-30, это безфактурная
+    # местность, а не настоящее перекрытие. Поэтому критерий §1.5 проверяется
+    # на событии с инеем; настройки порогов затем переносятся на full-cloud.
     p.add_argument("--start-seconds", type=float, default=0.0)
     p.add_argument("--end-seconds", type=float, default=80.0)
     p.add_argument("--fps", type=float, default=4.0,
                    help="sampling rate within the window")
-    # GT defaults are the *core* frost-on-lens window in GP010269.MP4.
-    # The obstruction has a soft ramp-up (~3 s) and ramp-down (~2 s) and
-    # a partial-defrost oscillation around t=25-30 s. PROJECT_PLAN §1.5
-    # only requires (i) trigger within 1-2 s of entry, (ii) clear within
-    # 1-2 s of exit, (iii) no false map-fix during the segment — it does
-    # not require 100 % flagged within the segment, since Stage 1.4
-    # downstream gates catch any frames the detector misses.
+    # Значения GT по умолчанию — ядро участка с инеем на линзе в GP010269.MP4.
+    # Перекрытие имеет мягкий вход (~3 с), мягкий выход (~2 с) и частичное
+    # оттаивание с колебаниями около t=25-30 с. PROJECT_PLAN §1.5 требует только:
+    # (i) срабатывание за 1-2 с от входа, (ii) очистка за 1-2 с от выхода,
+    # (iii) отсутствие ложных map-fix во время участка. 100 % флагов внутри
+    # участка не требуется, потому что downstream-ворота этапа 1.4 ловят кадры,
+    # которые detector пропустил.
     p.add_argument("--cloud-enter", type=float, default=12.0,
                    help="ground-truth obstruction-entry time (s)")
     p.add_argument("--cloud-exit", type=float, default=41.0,
@@ -96,9 +95,10 @@ def main() -> None:
 
     mask_tracker = None
     if (args.anchors_dir / "index.json").exists():
-        mask_tracker = AircraftMaskTracker.from_index(args.anchors_dir)
+        mask_tracker = load_aircraft_mask_tracker_for_video(args.anchors_dir, args.video)
+    if mask_tracker is not None:
         print(f"[verify] aircraft mask: {mask_tracker.num_anchors()} anchors")
-    else:
+    elif not (args.anchors_dir / "index.json").exists():
         print(f"[verify] WARNING: no anchors at {args.anchors_dir}; running without mask")
 
     detector = ObstructionDetector()
@@ -116,7 +116,7 @@ def main() -> None:
         if frame is None:
             break
         ts = cur / max(src_fps, 1e-6)
-        mask = mask_tracker.mask_for_frame(cur, frame.shape[:2]) if mask_tracker else None
+        mask = mask_tracker.mask_for_frame(cur, frame.shape[:2], frame=frame) if mask_tracker else None
         result = detector.detect(frame, aircraft_mask=mask)
         m = result.metrics
         rows.append({
@@ -131,7 +131,7 @@ def main() -> None:
     if not rows:
         raise SystemExit("no frames sampled")
 
-    # --- write CSV ---------------------------------------------------------
+    # --- запись CSV ---------------------------------------------------------
     csv_path = args.output_dir / "metrics.csv"
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
@@ -139,7 +139,7 @@ def main() -> None:
         w.writerows(rows)
     print(f"[verify] CSV  -> {csv_path}")
 
-    # --- plot ---------------------------------------------------------------
+    # --- график -------------------------------------------------------------
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -220,7 +220,7 @@ def main() -> None:
         panels.append(scaled)
 
     if panels:
-        # Two columns; pad heights to match.
+        # Две колонки; высоты выравниваем паддингом.
         max_h = max(p.shape[0] for p in panels)
         max_w = max(p.shape[1] for p in panels)
         padded = []
@@ -229,7 +229,7 @@ def main() -> None:
             pad_w = max_w - p.shape[1]
             padded.append(cv2.copyMakeBorder(p, 0, pad_h, 0, pad_w, cv2.BORDER_CONSTANT, value=(0, 0, 0)))
         rows_ct = [np.hstack(padded[i:i + 2]) for i in range(0, len(padded), 2)]
-        # Final pad to equal width across rows.
+        # Финальный паддинг, чтобы строки имели одинаковую ширину.
         max_row_w = max(r.shape[1] for r in rows_ct)
         rows_eq = [
             cv2.copyMakeBorder(r, 0, 0, 0, max_row_w - r.shape[1],
@@ -241,21 +241,20 @@ def main() -> None:
         cv2.imwrite(str(contact_path), sheet)
         print(f"[verify] contact -> {contact_path}")
 
-    # --- criterion check ----------------------------------------------------
+    # --- проверка критерия --------------------------------------------------
     lag_in = _detect_lag(times, final, args.cloud_enter, rising=True)
     lag_out = _detect_lag(times, final, args.cloud_exit, rising=False)
 
-    # False positives: detector firing in clean territory (>2s outside
-    # the GT cloud window — the 2s buffer absorbs the GT-boundary
-    # ambiguity on a 4-Hz sweep). FP > 0 = real bug, the detector
-    # would gate the matcher off on perfectly fine frames.
+    # False positive: detector срабатывает на чистом участке (>2 с вне GT-окна
+    # облака; буфер 2 с покрывает неоднозначность границы GT при sweep 4 Гц).
+    # FP > 0 — реальная ошибка: detector отключил бы matcher на нормальных кадрах.
     buf = 2.0
     outside = (times < args.cloud_enter - buf) | (times > args.cloud_exit + buf)
     fp = int((final & outside).sum())
     inside = (times >= args.cloud_enter) & (times <= args.cloud_exit)
-    # FN inside-segment is *advisory*: the obstruction itself oscillates
-    # (partial defrost), so 0 FN is unrealistic. Stage 1.4 inlier-ratio
-    # gates catch any unflagged-mid-segment frames downstream.
+    # FN внутри сегмента — *справочная* метрика: само перекрытие колеблется
+    # из-за частичного оттаивания, поэтому 0 FN нереалистично. Ворота
+    # inlier-ratio этапа 1.4 downstream ловят непомеченные кадры середины участка.
     fn = int(((~final) & inside).sum())
     inside_n = int(inside.sum())
     outside_n = int(outside.sum())

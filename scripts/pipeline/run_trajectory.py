@@ -32,14 +32,14 @@ def run_trajectory_tracking(video_path: str, duration_sec: int = 5, fps_out: int
     map_img_pil, bbox = map_loader.get_basemap_for_location(pos_t0.latitude, pos_t0.longitude, radius_tiles=1)
     map_cv2 = cv2.cvtColor(np.array(map_img_pil), cv2.COLOR_RGB2BGR)
     
-    # 2. Инициализация ИИ и Геолокатора
+    # 2. Инициализация сопоставителя и геолокатора
     matcher = NeuralMatcher()
     geolocator = Geolocator(bbox=bbox, map_shape=map_cv2.shape, smoothing_factor=0.2) # 0.2 - сильное сглаживание скачков
     
     # Подготовка визуала - будем рисовать трек прямо на карте
     output_map = map_cv2.copy()
     
-    print("\n[AI] Обработка кадров и расчет GPS...")
+    print("\n[matcher] Обработка кадров и расчет GPS...")
     for i in tqdm(range(total_frames)):
         frame_idx = i * frame_step
         frame = processor.extract_frame(frame_idx)

@@ -1,4 +1,4 @@
-"""Этапы 3.2/3.3: BEV-ректификатор (вид сверху) для стека восприятия.
+"""BEV-ректификатор (вид сверху) для стека восприятия.
 
 Вычисляет плоскую гомографию, проецирующую наклонный кадр самолёта
 (pitch 30–50° ниже горизонта) в синтетический надирный вид — именно
@@ -134,3 +134,20 @@ class BevRectifier:
         src = np.asarray(pts_rect, dtype=np.float64).reshape(-1, 1, 2)
         out = cv2.perspectiveTransform(src, self.H)
         return out.reshape(-1, 2)
+
+    def view_centre_body_m(self) -> tuple[float, float]:
+        """Точка тела (forward, right) в метрах, проецируемая в центр BEV.
+
+        Соглашение: первый компонент — forward (x_body), второй — right (y_body).
+        Для default-конфига (None) центр BEV соответствует пересечению оптической
+        оси с землёй: (agl/tan(|pitch|), 0).
+        """
+        if self.view_centre_body_xy_m is not None:
+            view_x, view_y = self.view_centre_body_xy_m
+            return (float(view_y), float(view_x))
+        p_abs = abs(self.pitch_deg)
+        if p_abs < 89.9:
+            forward_m = self.agl_m / math.tan(math.radians(p_abs))
+        else:
+            forward_m = 0.0
+        return (float(forward_m), 0.0)

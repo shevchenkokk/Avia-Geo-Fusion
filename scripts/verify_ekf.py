@@ -1,28 +1,27 @@
-"""Stage 2.4 verification: prove the EKF behaves as designed under
-controlled scenarios.
+"""Проверка этапа 2.4: доказать на контролируемых сценариях, что EKF ведёт
+себя как задумано.
 
-Four stages:
+Четыре этапа:
 
-  Stage 1 — pure propagation. Start at a known truth, predict for
-  60 s with no measurements. Trajectory drifts along the seeded
-  velocity; position covariance grows monotonically. The §2.4
-  criterion's "linearly growing uncertainty in the absence of fixes"
-  is checked here numerically.
+  Этап 1 — чистая протяжка. Стартуем из известной истины и 60 с прогнозируем
+  без измерений. Траектория идёт по заданной скорости, а ковариация позиции
+  монотонно растёт. Здесь численно проверяется критерий §2.4 про
+  «линейно растущую неопределённость при отсутствии фиксаций».
 
-  Stage 2 — full sensor fusion. Synthetic ground-truth flight
-  trajectory, simulated noisy OF every 0.1 s and noisy map fixes
-  every 2 s. Filter must track truth within 3σ at >95 % of timesteps.
+  Этап 2 — полный sensor fusion. Синтетическая истинная траектория полёта,
+  шумный OF каждые 0.1 с и шумные map-fix каждые 2 с. Фильтр должен держаться
+  в пределах 3σ от истины более чем на 95 % шагов.
 
-  Stage 3 — map-fix outage. Start with regular fixes for 30 s,
-  drop them for 30 s (OF only). Drift through the gap is bounded by
-  the velocity noise budget; filter recovers on the first fix after.
+  Этап 3 — пропуск map-fix. Первые 30 с идут регулярные фиксации, затем 30 с
+  только OF. Дрейф в разрыве ограничен бюджетом шума скорости; фильтр
+  восстанавливается на первой фиксации после пропуска.
 
-  Stage 4 — Mahalanobis outlier rejection. Inject a 5 km teleport
-  fix into a converged filter; filter state must stay close to truth
-  (the gate rejects the bogus measurement).
+  Этап 4 — отбраковка выброса по Mahalanobis. В сошедшийся фильтр подаётся
+  фиксация-телепорт на 5 км; состояние должно остаться рядом с истиной, потому
+  что ворота отвергают ложное измерение.
 
-The verification PASSES when all four stages meet their tolerances.
-A summary plot is written to ``results/stage2_4/verify.png``.
+Проверка считается пройденной, если все четыре этапа укладываются в допуски.
+Сводный график пишется в ``results/stage2_4/verify.png``.
 """
 
 from __future__ import annotations
@@ -55,7 +54,7 @@ def _seed_filter(bridge: FrameBridge, lat0, lon0, alt0, yaw_deg, speed) -> State
 
 
 # ---------------------------------------------------------------------------
-# Stage 1
+# Этап 1
 # ---------------------------------------------------------------------------
 
 def stage1_pure_propagation() -> dict:
@@ -85,7 +84,7 @@ def stage1_pure_propagation() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Stage 2 — synthetic truth + noisy measurements
+# Этап 2 — синтетическая истина + шумные измерения
 # ---------------------------------------------------------------------------
 
 def _simulate_truth(duration_s, dt, yaw_deg, speed, lat0, lon0, alt0):
@@ -121,8 +120,8 @@ def stage2_full_fusion() -> dict:
 
     for k in range(1, len(t)):
         f.predict(of_dt)
-        # OF measurement of body velocity. Body XY: vx_b along yaw,
-        # vy_b zero. Add noise.
+        # OF-измерение скорости в СК тела. Body XY: vx_b вдоль yaw,
+        # vy_b равен нулю. Добавляем шум.
         sigma_v = 1.5
         vx_b = speed + rng.normal(0.0, sigma_v)
         vy_b = 0.0 + rng.normal(0.0, sigma_v)
@@ -132,7 +131,7 @@ def stage2_full_fusion() -> dict:
                              dt=of_dt,
                              sigma_v_mps=sigma_v,
                              sigma_yaw_rate_radps=math.radians(0.5))
-        # Map fix every map_period_steps.
+        # Map-fix каждые map_period_steps.
         if k % map_period_steps == 0:
             sigma_xy = 20.0
             x_meas = x_e_truth[k] + rng.normal(0.0, sigma_xy)
@@ -143,9 +142,9 @@ def stage2_full_fusion() -> dict:
             else:
                 n_map_reject += 1
         f.update_altitude(750.0, sigma_h_m=50.0)
-        # Heading prior is gated automatically; will mostly fire.
+        # Heading prior ограничивается автоматически; здесь в основном срабатывает.
         f.maybe_update_heading_prior(sigma_heading_rad=math.radians(20.0))
-        # Track error.
+        # Ошибка трека.
         ex, ey, _ = f.position_enu()
         pos_err.append(math.hypot(ex - x_e_truth[k], ey - y_n_truth[k]))
         sigma_pos.append(f.position_sigma_m())
@@ -168,7 +167,7 @@ def stage2_full_fusion() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Stage 3 — outage
+# Этап 3 — пропуск фиксаций
 # ---------------------------------------------------------------------------
 
 def stage3_outage() -> dict:
@@ -181,9 +180,9 @@ def stage3_outage() -> dict:
 
     map_period = 1.0
     map_steps = int(round(map_period / of_dt))
-    n_pre = int(30.0 / of_dt)         # 30 s with map fixes
-    n_gap = int(30.0 / of_dt)         # 30 s map-fix outage
-    n_post = int(10.0 / of_dt)        # 10 s with map fixes again
+    n_pre = int(30.0 / of_dt)         # 30 с с map-fix
+    n_gap = int(30.0 / of_dt)         # 30 с без map-fix
+    n_post = int(10.0 / of_dt)        # ещё 10 с с map-fix
 
     yaw_r = math.radians(yaw_deg)
     vx_e_t = speed * math.sin(yaw_r)
@@ -233,7 +232,7 @@ def stage3_outage() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Stage 4 — Mahalanobis outlier rejection
+# Этап 4 — отбраковка выброса по Mahalanobis
 # ---------------------------------------------------------------------------
 
 def stage4_outlier_rejection() -> dict:
@@ -244,7 +243,7 @@ def stage4_outlier_rejection() -> dict:
     yaw_r = math.radians(30.0)
     vx_e_t = 70.0 * math.sin(yaw_r)
     vy_n_t = 70.0 * math.cos(yaw_r)
-    # Drive the filter to convergence with 10 s of clean data.
+    # Доводим фильтр до сходимости 10 секундами чистых данных.
     t = 0.0
     for _ in range(100):
         f.predict(of_dt)
@@ -261,17 +260,17 @@ def stage4_outlier_rejection() -> dict:
             sigma_xy_m=20.0,
         )
 
-    # Truth at end of warm-up.
+    # Истина в конце прогрева.
     pos_before = f.position_enu()
     sigma_before = f.position_sigma_m()
     truth_x = vx_e_t * t
     truth_y = vy_n_t * t
 
-    # Inject a 5 km teleport.
+    # Вбрасываем телепорт на 5 км.
     res_outlier = f.update_map_position(truth_x + 5000.0, truth_y - 5000.0, sigma_xy_m=20.0)
     pos_after_outlier = f.position_enu()
 
-    # Inject a clean fix; should accept and pull state to truth.
+    # Вбрасываем чистую фиксацию: она должна быть принята и подтянуть состояние к истине.
     res_clean = f.update_map_position(truth_x + rng.normal(0, 20),
                                       truth_y + rng.normal(0, 20),
                                       sigma_xy_m=20.0)

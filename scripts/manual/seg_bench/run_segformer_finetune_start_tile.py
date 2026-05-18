@@ -22,6 +22,205 @@ from mmengine.runner import Runner
 from mmseg.apis import inference_model, init_model
 
 
+def _patch_efficient_attention_for_contiguous() -> None:
+    """Wrap EfficientMultiheadAttention.forward so transposed tensors are
+    contiguous before they hit nn.MultiheadAttention.
+
+    Symptom: backward() raises
+       "RuntimeError: view size is not compatible with input tensor's size
+        and stride. Use .reshape(...) instead."
+    Cause: x.transpose(0, 1) yields a non-contiguous tensor; PyTorch's
+    MultiheadAttention internally calls .view() on it, which fails on
+    backward graph reconstruction. Adding .contiguous() after transpose
+    is the clean fix without editing the library.
+    """
+    from mmseg.models.backbones import mit as _mit
+
+    orig = _mit.EfficientMultiheadAttention.forward
+
+    def patched_forward(self, x, hw_shape, identity=None):
+        x_q = x
+        if self.sr_ratio > 1:
+            from mmseg.models.utils import nchw_to_nlc, nlc_to_nchw
+            x_kv = nlc_to_nchw(x, hw_shape)
+            x_kv = self.sr(x_kv)
+            x_kv = nchw_to_nlc(x_kv)
+            x_kv = self.norm(x_kv)
+        else:
+            x_kv = x
+
+        if identity is None:
+            identity = x_q
+
+        if self.batch_first:
+            x_q = x_q.transpose(0, 1).contiguous()
+            x_kv = x_kv.transpose(0, 1).contiguous()
+
+        out = self.attn(query=x_q, key=x_kv, value=x_kv)[0]
+
+        if self.batch_first:
+            out = out.transpose(0, 1).contiguous()
+
+        return identity + self.dropout_layer(self.proj_drop(out))
+
+    _mit.EfficientMultiheadAttention.forward = patched_forward
+    del orig
+
+
+_patch_efficient_attention_for_contiguous()
+
+
+def _patch_segformer_head_for_contiguous() -> None:
+    """torch.cat([upsampled, ...], dim=1) даёт тензор с не-contiguous-strides
+    (источники приходят из bilinear-resize). Когда он попадает в BatchNorm
+    декода, BN.backward внутри C++ делает .view() и падает на стенке
+    'view size is not compatible with input tensor stride'. Добавляем
+    .contiguous() после cat.
+    """
+    from mmseg.models.decode_heads import segformer_head as _shead
+    from mmseg.models.utils import resize as _resize
+
+    def patched_forward(self, inputs):
+        inputs = self._transform_inputs(inputs)
+        outs = []
+        for idx in range(len(inputs)):
+            # Backbone выдаёт тензор не-contiguous (после nlc_to_nchw +
+            # transpose в attention блоках). BatchNorm в conv(x).backward
+            # падает на view → делаем contiguous здесь и после resize.
+            x = inputs[idx].contiguous()
+            conv = self.convs[idx]
+            up = _resize(
+                input=conv(x),
+                size=inputs[0].shape[2:],
+                mode=self.interpolate_mode,
+                align_corners=self.align_corners,
+            )
+            outs.append(up.contiguous())
+        out = self.fusion_conv(torch.cat(outs, dim=1).contiguous())
+        out = self.cls_seg(out)
+        return out
+
+    _shead.SegformerHead.forward = patched_forward
+
+
+_patch_segformer_head_for_contiguous()
+
+
+def _patch_accuracy_for_safe_indexing() -> None:
+    """В mmseg `accuracy()` делает `correct[:, target != ignore_index]` по
+    3D-бул-маске. На CPU/MPS PyTorch 2.11 это падает с
+       "index 255 is out of bounds: 0, range 0 to 5"
+    Переписываем через flatten + 1D-маску — тот же результат, но без
+    advanced bool-indexing по нескольким измерениям.
+    """
+    from mmseg.models.losses import accuracy as _acc_module
+
+    def safe_accuracy(pred, target, topk=1, thresh=None, ignore_index=None):
+        if isinstance(topk, int):
+            topk = (topk,)
+            return_single = True
+        else:
+            return_single = False
+
+        maxk = max(topk)
+        if pred.size(0) == 0:
+            accu = [pred.new_tensor(0.0) for _ in range(len(topk))]
+            return accu[0] if return_single else accu
+
+        # На MPS PyTorch 2.11 любая bool-маска (включая `target != 255`) и
+        # последующие операции `.eq() + .expand_as()` ломаются с
+        # "index 255 is out of bounds". Acc_seg — просто метрика для
+        # логирования, считаем целиком на CPU.
+        device_orig = pred.device
+        pred_cpu = pred.detach().cpu()
+        target_cpu = target.detach().cpu()
+
+        assert pred_cpu.ndim == target_cpu.ndim + 1
+        pred_value, pred_label = pred_cpu.topk(maxk, dim=1)
+        pred_label = pred_label.transpose(0, 1)
+        correct = pred_label.eq(target_cpu.unsqueeze(0).expand_as(pred_label))
+        if thresh is not None:
+            correct = correct & (pred_value > thresh).t()
+
+        if ignore_index is not None:
+            correct_flat = correct.reshape(correct.shape[0], -1)
+            valid_mask = (target_cpu != ignore_index).reshape(-1)
+            correct = correct_flat[:, valid_mask]
+            valid_total = int(valid_mask.sum().item())
+        else:
+            valid_total = target_cpu.numel()
+
+        eps = torch.finfo(torch.float32).eps
+        res = []
+        for k in topk:
+            correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True) + eps
+            res.append(correct_k.mul_(100.0 / (valid_total + eps)).to(device_orig))
+        return res[0] if return_single else res
+
+    _acc_module.accuracy = safe_accuracy
+
+    from mmseg.models.decode_heads import decode_head as _dh
+    _dh.accuracy = safe_accuracy
+
+
+_patch_accuracy_for_safe_indexing()
+
+
+# Anomaly detection даёт развёрнутый stack trace на ошибки в backward —
+# использовалась для отладки view-stride багов. Включать только при отладке,
+# в обычной тренировке тормозит в ~5x.
+# torch.autograd.set_detect_anomaly(True)
+
+
+def _patch_cross_entropy_for_mps_class_weights() -> None:
+    """`F.cross_entropy(pred, target, weight=cw, ignore_index=255)` падает на
+    MPS PyTorch 2.11 с "index 255 out of bounds: range 0 to 5", когда target
+    содержит значения >= num_classes (паддинг 255). Workaround:
+    1. заменить ignore-позиции в label на валидный класс (0)
+    2. вызвать F.cross_entropy без ignore_index
+    3. обнулить loss на исходных ignore-позициях
+    Проксируется только если class_weight задан И device=mps. На CUDA исходное
+    поведение сохраняется.
+    """
+    import torch.nn.functional as F
+    from mmseg.models.losses import cross_entropy_loss as _cel
+
+    orig_cross_entropy = _cel.cross_entropy
+
+    def safe_cross_entropy(pred, label, weight=None, class_weight=None,
+                           reduction="mean", avg_factor=None,
+                           ignore_index=-100, avg_non_ignore=False):
+        if class_weight is None or pred.device.type != "mps":
+            return orig_cross_entropy(
+                pred, label, weight=weight, class_weight=class_weight,
+                reduction=reduction, avg_factor=avg_factor,
+                ignore_index=ignore_index, avg_non_ignore=avg_non_ignore,
+            )
+
+        ignore_mask = (label == ignore_index)
+        label_safe = torch.where(ignore_mask, torch.zeros_like(label), label)
+        loss = F.cross_entropy(
+            pred, label_safe, weight=class_weight, reduction="none",
+        )
+        loss = loss.masked_fill(ignore_mask, 0.0)
+
+        if avg_factor is None and reduction == "mean":
+            label_weights = class_weight[label_safe]
+            label_weights = label_weights.masked_fill(ignore_mask, 0.0)
+            avg_factor = label_weights.sum().clamp_min(1.0)
+
+        from mmseg.models.losses.utils import weight_reduce_loss
+        return weight_reduce_loss(
+            loss, weight=weight.float() if weight is not None else None,
+            reduction=reduction, avg_factor=avg_factor,
+        )
+
+    _cel.cross_entropy = safe_cross_entropy
+
+
+_patch_cross_entropy_for_mps_class_weights()
+
+
 CLASSES = (
     "background",
     "water",
@@ -45,6 +244,18 @@ MODEL_VARIANTS = {
         "num_heads": [1, 2, 5, 8],
         "in_channels": [32, 64, 160, 256],
     },
+    "b1": {
+        "embed_dims": 64,
+        "num_layers": [2, 2, 2, 2],
+        "num_heads": [1, 2, 5, 8],
+        "in_channels": [64, 128, 320, 512],
+    },
+    "b2": {
+        "embed_dims": 64,
+        "num_layers": [3, 4, 6, 3],
+        "num_heads": [1, 2, 5, 8],
+        "in_channels": [64, 128, 320, 512],
+    },
     "b5": {
         "embed_dims": 64,
         "num_layers": [3, 6, 40, 3],
@@ -55,11 +266,15 @@ MODEL_VARIANTS = {
 
 IMAGENET_PRETRAIN = {
     "b0": "https://download.openmmlab.com/mmsegmentation/v0.5/pretrain/segformer/mit_b0_20220624-7e0fe6dd.pth",
+    "b1": "https://download.openmmlab.com/mmsegmentation/v0.5/pretrain/segformer/mit_b1_20220624-02e5a6a1.pth",
+    "b2": "https://download.openmmlab.com/mmsegmentation/v0.5/pretrain/segformer/mit_b2_20220624-66e8bf70.pth",
     "b5": "https://download.openmmlab.com/mmsegmentation/v0.5/pretrain/segformer/mit_b5_20220624-658746d9.pth",
 }
 
 ADE20K_PRETRAIN = {
     "b0": "https://download.openmmlab.com/mmsegmentation/v0.5/segformer/segformer_mit-b0_512x512_160k_ade20k/segformer_mit-b0_512x512_160k_ade20k_20210726_101530-8ffa8fda.pth",
+    "b1": "https://download.openmmlab.com/mmsegmentation/v0.5/segformer/segformer_mit-b1_512x512_160k_ade20k/segformer_mit-b1_512x512_160k_ade20k_20210726_112106-d70e859d.pth",
+    "b2": "https://download.openmmlab.com/mmsegmentation/v0.5/segformer/segformer_mit-b2_512x512_160k_ade20k/segformer_mit-b2_512x512_160k_ade20k_20210726_112103-cbd414ac.pth",
     "b5": "https://download.openmmlab.com/mmsegmentation/v0.5/segformer/segformer_mit-b5_512x512_160k_ade20k/segformer_mit-b5_512x512_160k_ade20k_20210726_145235-94cedf59.pth",
 }
 
@@ -378,13 +593,36 @@ def build_quick_cfg(
 
     metainfo = {"classes": CLASSES, "palette": PALETTE}
 
+    # Расширенный масштаб (0.4..2.0) эмулирует разную высоту полёта над землёй
+    # при фиксированном фокусе. Albu-блок добавляет снег/туман/дождь, чтобы
+    # модель не падала при смене сезона относительно тренировочных тайлов.
+    # Albumentations 2.x: snow_point_range / fog_coef_range tuples (старые
+    # snow_point_lower/upper и fog_coef_lower/upper удалены).
+    albu_transforms = [
+        {"type": "RandomSnow", "snow_point_range": (0.1, 0.3),
+         "brightness_coeff": 2.5, "p": 0.15},
+        {"type": "RandomFog", "fog_coef_range": (0.1, 0.4),
+         "alpha_coef": 0.08, "p": 0.15},
+        {"type": "RandomRain", "blur_value": 3, "p": 0.05},
+        {"type": "RandomShadow", "p": 0.2},
+        {"type": "RGBShift", "r_shift_limit": 15, "g_shift_limit": 15, "b_shift_limit": 15, "p": 0.3},
+        {"type": "CLAHE", "clip_limit": 2.0, "p": 0.15},
+    ]
     train_pipeline = [
         {"type": "LoadImageFromFile"},
         {"type": "LoadAnnotations", "reduce_zero_label": False},
-        {"type": "RandomResize", "scale": (1024, 1024), "ratio_range": (0.5, 1.5), "keep_ratio": True},
-        {"type": "RandomCrop", "crop_size": (512, 512), "cat_max_ratio": 0.95},
-        {"type": "RandomFlip", "prob": 0.5},
-        {"type": "PhotoMetricDistortion"},
+        {"type": "RandomResize", "scale": (1024, 1024), "ratio_range": (0.4, 2.0), "keep_ratio": True},
+        {"type": "RandomCrop", "crop_size": (512, 512), "cat_max_ratio": 0.9},
+        {"type": "RandomFlip", "prob": 0.5, "direction": "horizontal"},
+        {"type": "RandomFlip", "prob": 0.2, "direction": "vertical"},
+        {"type": "RandomRotate", "prob": 0.5, "degree": 30, "pad_val": 0, "seg_pad_val": 0},
+        {"type": "PhotoMetricDistortion",
+         "brightness_delta": 32,
+         "contrast_range": (0.5, 1.5),
+         "saturation_range": (0.5, 1.5),
+         "hue_delta": 18},
+        {"type": "Albu", "transforms": albu_transforms,
+         "keymap": {"img": "image"}},
         {"type": "PackSegInputs"},
     ]
 
@@ -579,6 +817,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--warmup-ratio", type=float, default=0.05)
     parser.add_argument("--use-class-weights", action="store_true", default=False)
     parser.add_argument("--no-class-weights", dest="use_class_weights", action="store_false")
+    parser.add_argument("--manual-class-weights", default="",
+                        help="Comma-separated class weights override (e.g. '0.5,1.0,0.4,0.6,1.5'). "
+                             "If set, takes priority over --use-class-weights auto estimation.")
     parser.add_argument("--water-label-cleanup", action="store_true", default=True)
     parser.add_argument("--no-water-label-cleanup", dest="water_label_cleanup", action="store_false")
     parser.add_argument("--focus-iters", type=int, default=0, help="Second-stage finetune iters on visually similar subset")
@@ -649,9 +890,14 @@ def main() -> None:
             )
 
     class_weights = None
-    if args.use_class_weights:
+    if args.manual_class_weights.strip():
+        class_weights = [float(x) for x in args.manual_class_weights.split(",")]
+        if len(class_weights) != len(CLASSES):
+            raise ValueError(f"manual-class-weights expects {len(CLASSES)} values, got {len(class_weights)}")
+        print(f"class_weights (manual override) {class_weights}")
+    elif args.use_class_weights:
         class_weights = estimate_class_weights(mmseg_data_root / "ann_dir" / "train", len(CLASSES))
-        print("class_weights", class_weights)
+        print("class_weights (auto)", class_weights)
 
     cfg = build_quick_cfg(
         base_cfg_path=base_cfg,

@@ -298,16 +298,16 @@ def generate_final_video(video_path: str, output_path: str, duration_sec: int = 
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(str(raw_output_path_obj), fourcc, fps_out, (debug_w, debug_h))
     
-    print("Рендер кадров (Высокое качество, AI + Оптический поток)...")
+    print("Рендер кадров: ключевые сопоставления + оптический поток...")
     
-    # --- Лукас-Канаде Трекинг Переменные ---
+    # Переменные трекинга Лукаса-Канаде.
     lk_params = dict(winSize=(21, 21), maxLevel=3,
                      criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01))
     
     prev_gray_drone = None
     tracked_pts_drone = None
     tracked_pts_map = None
-    keyframe_interval = 10  # Раз в 1 секунду пересчитываем нейронкой
+    keyframe_interval = 10  # Раз в секунду обновляем тяжёлое сопоставление.
     min_tracked_points = 20
     tracking_state = "TRACK"
     high_conf_streak = 0
@@ -576,7 +576,7 @@ def generate_final_video(video_path: str, output_path: str, duration_sec: int = 
                 out.write(final_img)
                 continue
 
-            # Forward-backward check для устойчивости трекинга
+            # Проверка вперёд-назад для устойчивости трекинга
             p0r, st_back, _ = cv2.calcOpticalFlowPyrLK(drone_gray, prev_gray_drone, p1, None, **lk_params)
             if p0r is None or st_back is None:
                 tracked_pts_drone = None

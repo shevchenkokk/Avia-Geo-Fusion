@@ -1,31 +1,29 @@
-"""Generate a small synthetic GeoTIFF DEM for Stage 2.1 verification.
+"""Сгенерировать небольшой синтетический GeoTIFF DEM для проверки этапа 2.1.
 
-The lookup code in src/dem_lookup.py is source-agnostic — any
-EPSG:4326 GeoTIFF works. For criterion verification we want a DEM
-where every elevation is *analytically* known, so we can compare
-``DemLookup.elevation(lat, lon)`` to ground truth and prove the
-bilinear interpolation does what it claims.
+Код lookup в src/dem_lookup.py не зависит от источника: подойдёт любой
+EPSG:4326 GeoTIFF. Для проверки критерия нужен DEM, где каждая высота
+известна *аналитически*, чтобы можно было сравнить
+``DemLookup.elevation(lat, lon)`` с ground truth и доказать, что билинейная
+интерполяция работает как ожидается.
 
-Terrain shape (units: metres, MSL):
+Форма рельефа (единицы: метры MSL):
 
     z(lat, lon) = base + slope_lat * (lat - lat0) * 111111
                        + slope_lon * (lon - lon0) * 111111 * cos(lat0)
                        + hill * exp(-((lat - lat_h)^2 + (lon - lon_h)^2) / sigma^2)
 
-Mimics the kind of terrain we'd see over central Russia (Kolomna /
-Oka valley): ~130 m base, gentle north-rising slope, a single Gaussian
-hill in the middle of the mission bbox. The synthetic DEM reaches
-~210 m at the hill peak, so ``height_AGL`` at cruise altitude 750 m
-varies between ~540 m (over the hill) and ~620 m (in the valleys) —
-the kind of variation Stage 2.2's optical-flow VO needs to translate
-pixel velocities into metric speeds.
+Имитирует рельеф центральной России (Коломна / долина Оки): базовая высота
+около 130 м, мягкий подъём к северу и один гауссов холм в середине bbox
+миссии. Синтетический DEM достигает ~210 м на вершине холма, поэтому
+``height_AGL`` при крейсерской высоте 750 м меняется от ~540 м над холмом
+до ~620 м в низинах. Именно такая вариация нужна VO на optical flow из
+этапа 2.2, чтобы переводить пиксельные скорости в метрические.
 
-Resolution: 3 arc-seconds (~90 m). That's deliberate — it matches
-SRTM v4.1 grid spacing, is light enough to commit (~1 MB), and is
-coarse enough that bilinear interpolation produces a visibly
-*continuous* AGL curve along a flight path (cf. the step-edge
-artifact you'd see with nearest-neighbour). Real SRTM 1-arc-sec
-behaves identically.
+Разрешение: 3 угловые секунды (~90 м). Это сделано намеренно: совпадает с
+шагом сетки SRTM v4.1, файл достаточно лёгкий для репозитория (~1 МБ), а сетка
+достаточно грубая, чтобы билинейная интерполяция давала заметно *непрерывную*
+кривую AGL вдоль траектории. При nearest-neighbour был бы виден ступенчатый
+артефакт. Реальный SRTM 1-arc-sec ведёт себя так же.
 """
 
 from __future__ import annotations
@@ -38,19 +36,19 @@ import rasterio
 from rasterio.transform import from_origin
 
 
-# Terrain definition. Kept module-level so the verification script
-# can import it and check the lookup against the same analytic field.
+# Описание рельефа вынесено на уровень модуля, чтобы проверочный скрипт мог
+# импортировать его и сверять lookup с тем же аналитическим полем.
 BASE_MSL = 130.0
-SLOPE_NORTH_PER_M = 0.0008      # +0.08 m elevation per metre of north travel
-SLOPE_EAST_PER_M = -0.0003      # slight downhill to the east (toward Oka)
+SLOPE_NORTH_PER_M = 0.0008      # +0.08 м высоты на метр движения к северу
+SLOPE_EAST_PER_M = -0.0003      # лёгкий уклон вниз к востоку, в сторону Оки
 HILL_LAT = 55.25
 HILL_LON = 38.35
 HILL_HEIGHT = 80.0
-HILL_SIGMA_DEG = 0.06           # ~6.6 km wide gaussian
+HILL_SIGMA_DEG = 0.06           # гауссиан шириной ~6.6 км
 
 
 def expected_elevation(lat: float, lon: float, lat0: float, lon0: float) -> float:
-    """Analytic ground truth — must match exactly what we rasterise."""
+    """Аналитический ground truth: должен точно совпадать с тем, что растеризуем."""
     cos_lat0 = np.cos(np.deg2rad(lat0))
     d_north_m = (lat - lat0) * 111111.0
     d_east_m = (lon - lon0) * 111111.0 * cos_lat0
@@ -78,15 +76,15 @@ def main() -> None:
     width = int(round((args.east - args.west) / cell_deg))
     height = int(round((args.north - args.south) / cell_deg))
 
-    # Pixel-CENTRE convention: pixel (0,0) covers the NW corner; its
-    # centre is half a cell south-east of (west, north). rasterio's
-    # affine uses corner coordinates, so we set the top-left edge to
-    # (west, north) and let from_origin handle the rest.
+    # Соглашение по центрам пикселей: пиксель (0,0) покрывает северо-западный
+    # угол, а его центр лежит на пол-ячейки юго-восточнее (west, north).
+    # affine в rasterio использует координаты углов, поэтому задаём верхний
+    # левый край как (west, north), а остальное оставляем from_origin.
     transform = from_origin(args.west, args.north, cell_deg, cell_deg)
 
-    # Pre-compute pixel-centre lat/lon grids; that way the analytic
-    # field and the rasterised band agree to floating-point precision,
-    # which is what the verification script relies on.
+    # Заранее считаем сетки lat/lon центров пикселей, чтобы аналитическое поле
+    # и растеризованный канал совпадали до точности float — на это опирается
+    # проверочный скрипт.
     lats = args.north - (np.arange(height) + 0.5) * cell_deg
     lons = args.west + (np.arange(width) + 0.5) * cell_deg
     lat0, lon0 = args.south, args.west

@@ -221,6 +221,80 @@ def _load_layer_as_gdf(path: Path):
     raise ValueError(f"Неподдерживаемый формат слоя: {path}")
 
 
+ROAD_BUFFER_M = {
+    "motorway": 7.0,
+    "trunk": 6.0,
+    "primary": 5.0,
+    "secondary": 4.0,
+    "tertiary": 3.5,
+    "residential": 3.0,
+    "unclassified": 2.5,
+    "living_street": 2.0,
+    "service": 2.0,
+    "track": 1.5,
+    "path": 1.0,
+    "driveway": 1.5,
+    "parking_aisle": 2.0,
+    "pedestrian": 1.5,
+    "runway": 25.0,
+    "taxiway": 12.0,
+}
+DEFAULT_ROAD_BUFFER_M = 2.5
+
+# Из аэроперспективы это не «дороги»: тротуары, лестницы, велодорожки.
+# Если их рисовать как class=4, в моздовских тайлах они забивают 25% пикселей
+# и мешают модели учиться на реальных проездах.
+DROP_ROAD_CLASSES = {"footway", "steps", "cycleway", "sidewalk"}
+
+BUILDING_BUFFER_M = 1.5
+
+
+def _utm_epsg_for_bbox(minx: float, miny: float, maxx: float, maxy: float) -> int:
+    """Вернуть EPSG-код подходящей UTM зоны по центроиду bbox в WGS84."""
+    cx = (minx + maxx) / 2.0
+    cy = (miny + maxy) / 2.0
+    zone = int((cx + 180) // 6) + 1
+    return (32600 if cy >= 0 else 32700) + zone
+
+
+def _buffer_transportation_in_utm(gdf):
+    """Class-aware буфер дорог в UTM. Дропает тротуары/лестницы.
+    Вход и выход в EPSG:4326."""
+    if gdf is None or gdf.empty:
+        return gdf
+
+    if "class" in gdf.columns:
+        gdf = gdf[~gdf["class"].fillna("").str.lower().isin(DROP_ROAD_CLASSES)].copy()
+
+    if gdf.empty:
+        return gdf
+
+    minx, miny, maxx, maxy = gdf.total_bounds
+    utm_epsg = _utm_epsg_for_bbox(minx, miny, maxx, maxy)
+
+    g_utm = gdf.to_crs(epsg=utm_epsg)
+    if "class" in g_utm.columns:
+        widths = g_utm["class"].fillna("").str.lower().map(ROAD_BUFFER_M).fillna(DEFAULT_ROAD_BUFFER_M)
+    else:
+        widths = [DEFAULT_ROAD_BUFFER_M] * len(g_utm)
+    g_utm["geometry"] = [
+        geom.buffer(float(w)) if geom is not None and not geom.is_empty else geom
+        for geom, w in zip(g_utm.geometry, widths)
+    ]
+    return g_utm.to_crs(epsg=4326)
+
+
+def _buffer_buildings_in_utm(gdf, buffer_m: float = BUILDING_BUFFER_M):
+    """Раздуваем здания в реальных метрах через UTM, чтобы накрыть съехавшие крыши."""
+    if gdf is None or gdf.empty:
+        return gdf
+    minx, miny, maxx, maxy = gdf.total_bounds
+    utm_epsg = _utm_epsg_for_bbox(minx, miny, maxx, maxy)
+    g_utm = gdf.to_crs(epsg=utm_epsg)
+    g_utm["geometry"] = g_utm.geometry.buffer(float(buffer_m))
+    return g_utm.to_crs(epsg=4326)
+
+
 def _class_from_feature(layer_name: str, props: Dict[str, Any], mapping: Dict[str, int]) -> int:
     default_cls = int(mapping.get(f"{layer_name}:*", 0))
 
@@ -301,21 +375,18 @@ def rasterize_masks(config: Dict[str, Any], root: Path) -> Path:
             else:
                 gdf = gdf.to_crs(4326)
 
-            # --- НАЧАЛО: Модификация геометрии (утолщение и параллакс) ---
-            # Переводим в метрическую систему для корректного буфера в метрах
-            gdf = gdf.to_crs(epsg=3857)
-
+            # --- Модификация геометрии: буферы в реальных метрах через UTM ---
+            # EPSG:3857 искажает расстояния по широте (на Москве 1u ≈ 0.57m), что
+            # давало одинаковые жирные дороги вместо class-aware ширины. Плюс
+            # тротуары/лестницы (transportation:* fallback → class 4) занимали
+            # ~10k features в moscow_city и забивали 25% пикселей дорогами.
             if layer_name == "transportation":
-                # Утолщаем дороги на 4 метра в каждую сторону (общая ширина дороги ~8м)
-                gdf["geometry"] = gdf.geometry.buffer(4.0)
-            elif layer_name == "buildings":
-                # Раздуваем здания на 2.5 метра, чтобы накрыть съехавшие на фото крыши
-                gdf["geometry"] = gdf.geometry.buffer(2.5)
+                gdf = _buffer_transportation_in_utm(gdf)
+            elif layer_name in {"buildings", "osm_buildings"}:
+                gdf = _buffer_buildings_in_utm(gdf, buffer_m=BUILDING_BUFFER_M)
 
-            # Возвращаем в WGS84 для правильного пересечения с тайлами
-            gdf = gdf.to_crs(epsg=4326)
-            # --- КОНЕЦ: Модификация геометрии ---
-
+            if gdf is None or gdf.empty:
+                continue
             layer_gdfs[layer_name] = gdf
 
         tiles = enumerate_tiles(region["bbox"], zoom)
@@ -631,9 +702,19 @@ def generate_patches_and_split(
     for row in selected:
         region_to_rows[row["region_id"]].append(row)
 
-    region_ids = sorted(region_to_rows.keys())
-    train_regions = set(region_ids[: max(1, int(len(region_ids) * 0.7))])
-    val_regions = set(region_ids[max(1, int(len(region_ids) * 0.7)) : max(2, int(len(region_ids) * 0.85))])
+    # Сортируем регионы по количеству patches (богатые — в train), плюс
+    # принудительно держим в train регионы с runway/taxiway (airport) — это
+    # самый ценный класс для авиа-домена, и у нас всего один такой регион.
+    def _region_priority(region_id: str) -> tuple:
+        is_airport = "airport" in region_id.lower() or "svo" in region_id.lower()
+        return (0 if is_airport else 1, -len(region_to_rows[region_id]), region_id)
+
+    region_ids = sorted(region_to_rows.keys(), key=_region_priority)
+    n = len(region_ids)
+    n_train = max(1, int(n * 0.7))
+    n_val = max(1, int(n * 0.15)) if n - n_train >= 2 else max(0, n - n_train - 1)
+    train_regions = set(region_ids[:n_train])
+    val_regions = set(region_ids[n_train : n_train + n_val])
     test_regions = set(region_ids) - train_regions - val_regions
 
     for row in selected:

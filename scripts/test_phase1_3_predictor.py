@@ -1,14 +1,14 @@
-"""Stage 1.3 isolated test: bootstrap a Geolocator with a known velocity,
-let it dead-reckon for N frames, and verify that:
+"""Изолированный тест этапа 1.3: инициализировать Geolocator известной скоростью,
+дать ему N кадров счисления пути и проверить, что:
 
-  (a) ``predict_only()`` advances position in the expected direction,
-  (b) MapManager fed the predicted positions actually shifts its window
-      (i.e. ``tile_id`` changes over time, the §1.3 gate criterion).
+  (a) ``predict_only()`` сдвигает позицию в ожидаемом направлении;
+  (b) MapManager, получая предсказанные позиции, действительно сдвигает окно,
+      то есть ``tile_id`` со временем меняется — критерий ворот из §1.3.
 
-This bypasses the matcher entirely — we're not testing match quality
-here, only the dead-reckoning loop. Without this, the §1.3 criterion
-can't be verified on ``GP010269.MP4`` because the matcher never lands
-a first lock to bootstrap the Kalman filter (no telemetry, wrong tile).
+Матчер здесь полностью обходится: проверяется не качество сопоставления, а
+контур счисления пути. Без этого критерий §1.3 нельзя проверить на
+``GP010269.MP4``, потому что матчер не получает первый захват для bootstrap
+фильтра Калмана: телеметрии нет, тайл неверный.
 """
 
 from __future__ import annotations
@@ -31,8 +31,8 @@ def _tile_id(mm: MapManager) -> str:
 
 
 def main() -> None:
-    # Cruise position somewhere over central Russia; exact value doesn't
-    # matter — we only care that prediction + tile shift are consistent.
+    # Крейсерская позиция где-то над центральной Россией; точное значение
+    # не важно, нужна только согласованность прогноза и сдвига тайла.
     start_lat, start_lon = 55.5, 38.5
 
     print("[test] initializing MapManager + Geolocator at "
@@ -41,11 +41,11 @@ def main() -> None:
     map_cv2, bbox = mm.initialize(start_lat, start_lon)
     geo = Geolocator(bbox=bbox, map_shape=map_cv2.shape)
 
-    # Seed Kalman: cruise NE at ~70 m/s ≈ 0.0006 deg per second along
-    # both lat and lon. The Kalman state is [lat, lon, v_lat, v_lon]
-    # where velocities are *per timestep*. The geolocator runs at the
-    # diagnostic sampling rate, so we set per-step velocity directly.
-    # 0.0006 deg/step is exaggerated to make tile shifts happen quickly.
+    # Инициализируем Калман: крейсер на северо-восток около 70 м/с ≈ 0.0006°
+    # в секунду и по lat, и по lon. Состояние Калмана — [lat, lon, v_lat, v_lon],
+    # где скорости заданы *на шаг*. Geolocator работает на частоте диагностики,
+    # поэтому задаём скорость за шаг напрямую. 0.0006°/шаг специально завышено,
+    # чтобы сдвиг тайлов проявился быстро.
     v_lat, v_lon = 0.0006, 0.0006
     geo.kalman.statePre = np.array([[start_lat], [start_lon], [v_lat], [v_lon]], np.float32)
     geo.kalman.statePost = np.array([[start_lat], [start_lon], [v_lat], [v_lon]], np.float32)
@@ -61,7 +61,7 @@ def main() -> None:
         pred = geo.predict_only()
         assert pred is not None, "predict_only returned None despite initialized Kalman"
         pred_lat, pred_lon = pred
-        # Sanity: prediction should drift NE (lat+, lon+).
+        # Sanity-check: прогноз должен дрейфовать на северо-восток (lat+, lon+).
         assert pred_lat > last_pred[0] - 1e-9, f"lat went backwards at step {step}"
         assert pred_lon > last_pred[1] - 1e-9, f"lon went backwards at step {step}"
         last_pred = pred

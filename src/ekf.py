@@ -196,8 +196,9 @@ class StateFilter:
             return UpdateResult(False, d2, y, channel)
         K = np.linalg.solve(S.T, (self.P @ H.T).T).T
         self.x = self.x + K @ y
-        if self.IDX_YAW in wrap_idx or self.IDX_YAW < self.DIM:
-            self.x[self.IDX_YAW] = wrap_pi(self.x[self.IDX_YAW])
+        # Yaw — циклическое состояние; всегда нормализуем после любого обновления.
+        # Параметр wrap_idx касается только компонент невязки y (см. heading update).
+        self.x[self.IDX_YAW] = wrap_pi(self.x[self.IDX_YAW])
         # Форма Джозефа: P = (I-KH)P(I-KH)ᵀ + KRKᵀ — симметрична и PSD-устойчива.
         I = np.eye(self.DIM)
         IKH = I - K @ H

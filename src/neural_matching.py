@@ -17,6 +17,9 @@
     }
 """
 
+import os
+from pathlib import Path
+
 import cv2
 import torch
 import numpy as np
@@ -34,6 +37,13 @@ from src.segmentation import SkySegmenter
 
 logger = logging.getLogger(__name__)
 
+_XFEAT_REPO = "verlab/accelerated_features"
+_XFEAT_CACHE_DIR = "verlab_accelerated_features_main"
+
+
+def _torch_hub_dir() -> Path:
+    return Path(os.environ.get("TORCH_HOME", Path.home() / ".cache" / "torch")) / "hub"
+
 try:
     import lightglue as LG
     from lightglue import LightGlue, SuperPoint
@@ -44,8 +54,8 @@ except Exception:
     LG = None
     LIGHTGLUE_AVAILABLE = False
 
-# XFeat (CVPR 2024) — основной матчер Stage 3.4. Загружается лениво через
-# torch.hub при первом использовании backend'а "xfeat".
+# XFeat (CVPR 2024) — основной матчер этапа 3.4. Загружается лениво через
+# torch.hub при первом использовании бэкенда "xfeat".
 XFEAT_AVAILABLE = True  # определяется в рантайме в _init_xfeat
 
 
@@ -147,13 +157,18 @@ class NeuralMatcher:
         ломающими Apple-MPS в текущих сборках torch.
         """
         try:
+            repo = _torch_hub_dir() / _XFEAT_CACHE_DIR
+            repo_or_dir = str(repo) if repo.exists() else _XFEAT_REPO
+            source = "local" if repo.exists() else "github"
             self.xfeat = torch.hub.load(
-                "verlab/accelerated_features",
+                repo_or_dir,
                 "XFeat",
                 pretrained=True,
                 top_k=4096,
+                source=source,
                 trust_repo=True,
                 verbose=False,
+                skip_validation=True,
             )
             self.xfeat = self.xfeat.cpu().eval()
             self.xfeat_device = torch.device("cpu")
@@ -340,7 +355,7 @@ class NeuralMatcher:
         return mkpts0, mkpts1
 
     def _geometric_filter(self, pts0: np.ndarray, pts1: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """RANSAC-фильтр: сначала гомография, затем fallback на affine."""
+        """RANSAC-фильтр: сначала гомография, затем запасной вариант через affine."""
         n = len(pts0)
         if n < 4:
             return np.empty((0, 2), dtype=np.float32), np.empty((0, 2), dtype=np.float32), np.zeros(0, dtype=bool)

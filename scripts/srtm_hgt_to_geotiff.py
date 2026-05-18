@@ -1,16 +1,16 @@
-"""Convert an SRTM 1-arc-second HGT tile to a GeoTIFF in EPSG:4326.
+"""Конвертировать SRTM HGT-тайл 1 arc-second в GeoTIFF EPSG:4326.
 
-The HGT format is a raw big-endian int16 grid of 3601×3601 (1-arc-sec)
-or 1201×1201 (3-arc-sec) covering one 1°×1° cell. The filename encodes
-the south-west corner: ``N55E038.hgt`` means lat ∈ [55°, 56°], lon ∈
-[38°, 39°]. Row 0 is the NORTH edge, last row is the SOUTH edge.
+Формат HGT — это сырая big-endian int16 сетка 3601×3601 (1-arc-sec) или
+1201×1201 (3-arc-sec), покрывающая одну ячейку 1°×1°. Имя файла кодирует
+юго-западный угол: ``N55E038.hgt`` означает lat ∈ [55°, 56°],
+lon ∈ [38°, 39°]. Строка 0 — северная граница, последняя строка — южная.
 
-We expose this as a one-shot script rather than hiding it inside
-``DemLookup``: the lookup is supposed to be source-agnostic (any
-EPSG:4326 GeoTIFF), and turning the HGT into a GeoTIFF up front keeps
-that contract clean.
+Это вынесено в отдельный одноразовый скрипт, а не спрятано внутрь
+``DemLookup``: lookup должен оставаться независимым от источника (любой
+EPSG:4326 GeoTIFF), а предварительная конвертация HGT в GeoTIFF сохраняет этот
+контракт чистым.
 
-Usage::
+Пример::
 
     python scripts/srtm_hgt_to_geotiff.py data/dem/N55E038.hgt \\
         --out data/dem/srtm_n55_e038.tif
@@ -33,7 +33,7 @@ if str(ROOT) not in sys.path:
 
 
 def parse_hgt_corner(name: str) -> tuple[int, int]:
-    """Parse ``N55E038`` -> (lat=55, lon=38). Returns south-west corner."""
+    """Разобрать ``N55E038`` -> (lat=55, lon=38). Возвращает юго-западный угол."""
     m = re.match(r"([NS])(\d{2})([EW])(\d{3})", name.upper())
     if m is None:
         raise ValueError(f"unrecognised HGT name: {name}")
@@ -69,10 +69,10 @@ def main() -> None:
         )
     band = raw.reshape(side, side).astype(np.int16)
 
-    # SRTM corners are PIXEL CENTERS, so a 3601×3601 tile covers
-    # exactly 1° in each axis with pixel size 1/3600. The transform's
-    # origin is the upper-left pixel center; rasterio's from_origin
-    # expects the upper-left CORNER, so shift by half a pixel.
+    # У SRTM углы — это ЦЕНТРЫ ПИКСЕЛЕЙ, поэтому тайл 3601×3601 покрывает
+    # ровно 1° по каждой оси с размером пикселя 1/3600. Начало transform —
+    # центр верхнего левого пикселя, а rasterio.from_origin ждёт верхний левый
+    # УГОЛ, поэтому сдвигаем на полпикселя.
     pixel_deg = 1.0 / (side - 1)
     upper_left_lon = sw_lon - 0.5 * pixel_deg
     upper_left_lat = (sw_lat + 1.0) + 0.5 * pixel_deg

@@ -1,24 +1,24 @@
-"""Stage 3.5 step 2: prove the retriever picks plausible tiles for
-real cruise frames from GP010269.MP4.
+"""Этап 3.5, шаг 2: проверить, что retriever выбирает правдоподобные тайлы
+для реальных кадров крейсерского участка GP010269.MP4.
 
-Without telemetry on this footage we can't enforce a tight error
-bound; the §3.5 verification is qualitative on three dimensions:
+Без телеметрии на этом видео нельзя задать строгую границу ошибки, поэтому
+проверка §3.5 качественная и смотрит на три вещи:
 
-  1. **Signal vs noise.** The top-1 cosine similarity must
-     significantly exceed the median over the whole DB. If they're
-     comparable, the retriever is essentially returning random tiles.
+  1. **Сигнал против шума.** Косинусная близость top-1 должна заметно
+     превышать медиану по всей базе. Если значения близки, retriever по сути
+     возвращает случайные тайлы.
 
-  2. **Temporal consistency.** Cruise frames 1 s apart should retrieve
-     either the same tile or geographic neighbours — the aircraft
-     moves only ~70 m/s, well below the 1.4-km tile spacing at z=14,
-     so consecutive top-1's must be within ≤2 tiles of each other.
+  2. **Временная согласованность.** Кадры с интервалом 1 с должны находить
+     тот же тайл или географических соседей: самолёт движется примерно
+     70 м/с, что намного меньше шага тайлов ~1.4 км на z=14. Поэтому соседние
+     top-1 должны отличаться не более чем на два тайла.
 
-  3. **Visual plausibility.** A contact sheet of (query frame, top-1
-     retrieved tile) is written for human inspection.
+  3. **Визуальная правдоподобность.** Для ручной проверки сохраняется contact
+     sheet из пары: кадр запроса и найденный top-1 тайл.
 
-If all three pass, the retriever is good enough to seed MapManager
-for the full pipeline. Tuning to AnyLoc-grade recall (VLAD over
-patches) is a follow-up if needed.
+Если все три пункта пройдены, retriever достаточно хорош для начальной
+инициализации MapManager в полном пайплайне. Доводка до качества уровня
+AnyLoc с VLAD по патчам остаётся запасным направлением.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-# macOS Python SSL cert workaround for torch.hub fetches.
+# Обход проблемы SSL-сертификатов в macOS Python при загрузках через torch.hub.
 try:
     import certifi  # type: ignore
     os.environ.setdefault("SSL_CERT_FILE", certifi.where())
@@ -82,7 +82,7 @@ def main() -> None:
     proc = VideoProcessor(str(args.video), default_geo=(55.086025, 38.149033, 750.0))
     src_fps = proc.info.fps
 
-    # Sample frames in clean cruise window.
+    # Берём кадры из чистого крейсерского участка.
     times = []
     cur = args.cruise_start_s
     while cur <= args.cruise_end_s:
@@ -90,7 +90,7 @@ def main() -> None:
         cur += args.sample_period_s
     print(f"[verify] sampling {len(times)} frames at {args.sample_period_s} s spacing")
 
-    # Stage A — score-vs-noise plus per-frame results.
+    # Этап A: отношение оценки к шуму и покадровые результаты.
     rows = []
     for t in times:
         fi = int(round(t * src_fps))
@@ -98,7 +98,7 @@ def main() -> None:
         if frame is None:
             continue
         d = retr.encode(frame)
-        # Full distribution for noise floor.
+        # Полное распределение нужно для оценки шумового пола.
         scores_all = db.descriptors @ d
         med = float(np.median(scores_all))
         mx = float(scores_all.max())
@@ -113,7 +113,7 @@ def main() -> None:
             "frame": frame,
         })
 
-    # ---- Stage A: signal vs noise --------------------------------------
+    # ---- Этап A: сигнал против шума ------------------------------------
     top1_scores = np.array([r["top1_score"] for r in rows])
     median_scores = np.array([r["median_score"] for r in rows])
     margin = top1_scores - median_scores
@@ -125,7 +125,7 @@ def main() -> None:
     sa_ok = float(np.median(margin)) > 0.05
     print(f"  stageA -> {'OK' if sa_ok else 'FAIL'} (criterion: top1 - DBmed median > 0.05)")
 
-    # ---- Stage B: temporal consistency ---------------------------------
+    # ---- Этап B: временная согласованность -----------------------------
     print()
     print("[stageB] temporal consistency (consecutive samples)")
     jumps_m = []
@@ -133,7 +133,7 @@ def main() -> None:
     for r0, r1 in zip(rows[:-1], rows[1:]):
         d_m = _haversine_m(r0["top1_lat"], r0["top1_lon"], r1["top1_lat"], r1["top1_lon"])
         jumps_m.append(d_m)
-        # Two adjacent z=14 tiles (1.4 km), allow 2 hops = 2.8 km.
+        # Два соседних тайла z=14 дают около 1.4 км; разрешаем 2 шага = 2.8 км.
         if d_m <= 2800.0:
             consistent_count += 1
     n_pairs = max(1, len(rows) - 1)
@@ -145,9 +145,9 @@ def main() -> None:
     sb_ok = consistent_frac >= 0.7
     print(f"  stageB -> {'OK' if sb_ok else 'FAIL'} (criterion: ≥70 % consistent hops)")
 
-    # ---- Stage C: contact sheet ----------------------------------------
-    # Pull the matching tile image to render side-by-side. We re-fetch
-    # via MapDownloader to avoid re-indexing the cache.
+    # ---- Этап C: contact sheet -----------------------------------------
+    # Загружаем найденный тайл, чтобы положить его рядом с кадром. Повторно
+    # берём его через MapDownloader, чтобы не переиндексировать кэш.
     from src.map_loader import MapDownloader
     loader = MapDownloader(zoom=db.zoom)
     contact_rows = []
@@ -159,7 +159,7 @@ def main() -> None:
         if pil is None:
             continue
         tile_bgr = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
-        # Centre-crop the query frame to a square and resize to tile width.
+        # Обрезаем центральный квадрат кадра и приводим его к ширине тайла.
         f = r["frame"]
         h, w = f.shape[:2]
         s = min(h, w)

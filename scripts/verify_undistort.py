@@ -1,18 +1,18 @@
-"""Stage 3.1 verification: prove the canonical Undistorter does the
-round-trip cleanly and produces a sane rectified frame on real GP010269
-footage. Two stages:
+"""Проверка этапа 3.1: убедиться, что канонический Undistorter корректно
+проходит round-trip и даёт адекватный выпрямленный кадр на реальном видео
+GP010269. Два этапа:
 
-  Stage A — point round-trip. Sample a 12×8 grid of pixels across the
-  raw frame, undistort then re-distort each, confirm the recovered raw
-  pixel matches the input within sub-pixel error. This catches errors
-  in the K/D loading or the inverse formulation.
+  Этап A — point round-trip. Берётся сетка 12×8 пикселей по raw-кадру, каждая
+  точка проходит undistort, затем re-distort; проверяется, что восстановленный
+  raw-пиксель совпадает с исходным в пределах субпиксельной ошибки. Так ловятся
+  ошибки загрузки K/D или обратной формулы.
 
-  Stage B — visual smoke. Pick a cruise frame from GP010269.MP4 (post-
-  frost), undistort it, save raw + rectified side by side, and assert
-  the rectified image is non-degenerate (contains content, not just
-  black or NaN).
+  Этап B — visual smoke. Берётся крейсерский кадр из GP010269.MP4 после наледи,
+  выполняется undistort, raw и rectified сохраняются рядом, после чего
+  проверяется, что выпрямленное изображение не вырождено: содержит данные, а
+  не только чёрный цвет или NaN.
 
-Outputs:
+Выходы:
     results/stage3_1/roundtrip.txt
     results/stage3_1/before_after.png
 """
@@ -68,7 +68,7 @@ def stage_b_visual(
     raw_small = cv2.resize(frame, (target_w, th), interpolation=cv2.INTER_AREA)
     rect_small = cv2.resize(rect, (target_w, th), interpolation=cv2.INTER_AREA)
 
-    # Label both panels for the contact sheet.
+    # Подписываем обе панели для contact sheet.
     def _label(img, txt):
         out = img.copy()
         cv2.putText(out, txt, (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
@@ -83,9 +83,9 @@ def stage_b_visual(
     ])
     cv2.imwrite(str(out_path), sheet)
 
-    # Sanity: rectified frame should contain meaningful content.
+    # Sanity-check: выпрямленный кадр должен содержать осмысленное изображение.
     rect_gray = cv2.cvtColor(rect, cv2.COLOR_BGR2GRAY) if rect.ndim == 3 else rect
-    # Cropped centre to skip the black border that appears at balance>0.
+    # Берём центр, чтобы пропустить чёрную рамку, возникающую при balance>0.
     cy0, cy1 = int(0.2 * h), int(0.8 * h)
     cx0, cx1 = int(0.2 * w), int(0.8 * w)
     centre = rect_gray[cy0:cy1, cx0:cx1]

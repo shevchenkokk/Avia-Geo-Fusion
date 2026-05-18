@@ -1,9 +1,9 @@
-"""Render diagnostic summary + state-timeline plots from an existing
+"""Построить диагностическую сводку и графики state-timeline из готового
 ``frames_<run>.csv``.
 
-Used when a long diagnostic run was killed mid-flight and the partial
-CSV is still useful — or when we want to re-render plots with different
-styling without re-doing the matcher pass.
+Полезно, если длинный диагностический прогон был прерван на середине, но
+частичный CSV ещё пригоден, или если нужно перерисовать графики с другим
+оформлением без повторного прохода матчера.
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ def main() -> None:
             rows.append(_coerce_row(r))
 
     logger = DiagnosticLogger(output_dir=output_dir, run_name=run_name + "_replot")
-    # Inject the rows directly without re-writing CSV — we just want the plots.
+    # Подкладываем строки напрямую без перезаписи CSV: нужны только графики.
     logger._rows = rows  # noqa: SLF001
     logger._fp.close()
     summary = logger._summary()

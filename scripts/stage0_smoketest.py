@@ -1,22 +1,22 @@
-"""Stage 0 smoke test: render a short clip with fisheye undistort + the
-nearest seed aircraft mask overlaid.
+"""Smoke-тест этапа 0: собрать короткий клип с fisheye-undistort и наложением
+ближайшей начальной маски самолёта.
 
-Inputs:
-  * source video                          (data/videos/GP010269.MP4)
-  * fisheye intrinsics from Stage 0a      (configs/camera_gopro_hx.yaml)
-  * seed masks from Stage 0b              (data/masks/anchors/index.json)
+Входы:
+  * исходное видео                         (data/videos/GP010269.MP4)
+  * fisheye-интринсики из этапа 0a         (configs/camera_gopro_hx.yaml)
+  * начальные маски из этапа 0b            (data/masks/anchors/index.json)
 
-Output:
-  * an mp4 covering ``--duration`` seconds starting at ``--start-time`` with
-    side-by-side panels: original frame on the left, undistorted-with-mask
-    on the right. Lets us eyeball that the fisheye straightens and the
-    aircraft body stays under the mask across a continuous segment.
+Выход:
+  * mp4 длиной ``--duration`` секунд от ``--start-time`` с двумя панелями:
+    слева исходный кадр, справа выпрямленный кадр с маской. Так можно глазами
+    проверить, что fisheye выпрямляется, а корпус самолёта остаётся под маской
+    на непрерывном отрезке.
 
-The mask shown on each output frame is the seed mask of the temporally
-closest anchor. This is a sanity check, not the runtime mask: real online
-propagation (Stage 1.2) will follow the body via optical flow. The fact
-that nearest-anchor masks visibly track the body across a 30 s window
-already tells us Stage 0b masks are temporally usable.
+На каждом выходном кадре показывается начальная маска ближайшего по времени
+якоря. Это sanity-check, а не рабочая runtime-маска: настоящая онлайн-протяжка
+из этапа 1.2 будет вести корпус по optical flow. Если ближайшие якорные маски
+визуально держатся на корпусе в окне 30 секунд, значит маски этапа 0b уже
+пригодны по времени.
 """
 
 from __future__ import annotations

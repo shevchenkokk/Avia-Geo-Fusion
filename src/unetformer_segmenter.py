@@ -23,8 +23,8 @@ class UNetFormerSegmenter:
     LOVEDA_STABLE_IDS = {1, 2}
     LOVEDA_NUM_CLASSES = 7
 
-    # ADE20K-IDs стабильных «наземных» классов — только для аварийного
-    # fallback на nvidia/segformer-b0-finetuned-ade-512-512, если чекпойнт
+    # ADE20K-ID стабильных «наземных» классов — только для аварийного
+    # отката на nvidia/segformer-b0-finetuned-ade-512-512, если чекпойнт
     # UNetFormer не найден.
     ADE20K_FALLBACK_STABLE_IDS = {1, 6, 16, 20, 25, 38, 42, 45, 59, 93}
 

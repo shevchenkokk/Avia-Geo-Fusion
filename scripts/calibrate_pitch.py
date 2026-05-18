@@ -1,22 +1,21 @@
-"""Stage 3.2: pitch calibration via grid search.
+"""Этап 3.2: калибровка pitch через перебор сетки.
 
-For each candidate pitch we run the **same per-frame pipeline as
-``end_to_end_smoke``** — retriever picks the top-1 z=14 tile, the
-MapManager opens a small z=17 window around it, and the matcher runs
-on the BEV-rectified frame against that window. Across all sample
-frames we aggregate the matcher's quality metrics; the pitch with the
-highest median ``num_inliers`` wins.
+Для каждого кандидата pitch запускается **тот же покадровый пайплайн, что и
+в ``end_to_end_smoke``**: retriever выбирает top-1 тайл z=14, MapManager
+открывает вокруг него небольшое окно z=17, а матчер сопоставляет
+BEV-выпрямленный кадр с этим окном. По всем выбранным кадрам агрегируются
+метрики качества матчера; побеждает pitch с максимальной медианой
+``num_inliers``.
 
-Why retriever-based: the original grid run on a 5×5 km mosaic without
-retriever produced 0/N accepted at every pitch (fixed by §3.5; the
-retriever solves the bootstrap problem the original calibration tried
-to side-step with a wide window).
+Почему через retriever: исходный перебор на мозаике 5×5 км без retriever давал
+0/N принятых измерений при любом pitch. Это исправлено в §3.5: retriever решает
+bootstrap-проблему, которую прежняя калибровка пыталась обойти широким окном.
 
-Output:
-    results/stage3_2/pitch_grid.csv   per-(pitch, frame) metrics
+Выход:
+    results/stage3_2/pitch_grid.csv   метрики по каждой паре (pitch, frame)
     results/stage3_2/pitch_summary.txt
-    results/stage3_2/best_pitch.png   visual: BEV at best pitch alongside
-                                       the satellite tile of one mid frame
+    results/stage3_2/best_pitch.png   визуально: BEV при лучшем pitch рядом
+                                       со спутниковым тайлом среднего кадра
 """
 
 from __future__ import annotations
@@ -40,7 +39,7 @@ try:
 except Exception:
     pass
 
-from src.aircraft_mask import AircraftMaskTracker
+from src.aircraft_mask import load_aircraft_mask_tracker_for_video
 from src.bev_rectifier import BevRectifier
 from src.map_manager import MapManager
 from src.map_measurement import compute_map_measurement
@@ -95,13 +94,12 @@ def main() -> None:
     print(f"[calib] pitch grid    : {args.pitches_deg}")
     print(f"[calib] window_radius : {args.window_radius} (retriever-based)")
 
-    # Pipeline components.
+    # Компоненты пайплайна.
     undistorter = Undistorter.from_yaml(args.camera_config)
     print(f"[calib] K_rect[0,0]   : {undistorter.K_rect[0,0]:.2f}")
 
-    mask_tracker = None
-    if (args.anchors_dir / "index.json").exists():
-        mask_tracker = AircraftMaskTracker.from_index(args.anchors_dir)
+    mask_tracker = load_aircraft_mask_tracker_for_video(args.anchors_dir, args.video)
+    if mask_tracker is not None:
         print(f"[calib] anchors       : {mask_tracker.num_anchors()}")
 
     matcher = NeuralMatcher(backend=args.backend, apply_clahe=args.apply_clahe)
@@ -112,7 +110,7 @@ def main() -> None:
                           default_geo=(55.086025, 38.149033, 750.0))
     src_fps = proc.info.fps
 
-    # MapManager cache keyed by retriever tile_id (z=14 tile -> z=17 window).
+    # Кэш MapManager по retriever tile_id: тайл z=14 -> окно z=17.
     mm_cache: dict[str, tuple] = {}
 
     def _ensure_window(tile_id: str, lat: float, lon: float):
@@ -152,13 +150,13 @@ def main() -> None:
             if frame_raw is None:
                 continue
 
-            # Retriever picks the tile.
+            # Retriever выбирает тайл.
             top = retr.query_image(frame_raw, top_k=1)[0]
             map_cv2, bbox = _ensure_window(top["tile_id"], top["lat"], top["lon"])
 
-            # Standard frame pipeline (same as end_to_end_smoke).
+            # Стандартный покадровый пайплайн, как в end_to_end_smoke.
             mask_raw = (
-                mask_tracker.mask_for_frame(fi, frame_raw.shape[:2])
+                mask_tracker.mask_for_frame(fi, frame_raw.shape[:2], frame=frame_raw)
                 if mask_tracker is not None else None
             )
             frame_rect = undistorter.undistort_image(frame_raw)
@@ -225,9 +223,9 @@ def main() -> None:
         pitch_scores.append((pitch, med, mean, accept_rate))
         summary_lines.append(f"{pitch:+.1f}, {med:.1f}, {mean:.1f}, {accept_rate:.2f}")
 
-    # Score = (accept_rate, median_inliers) — accept rate dominates because
-    # an inlier count below the §1.4 threshold is operationally useless even
-    # if it's the highest in the grid.
+    # Оценка = (accept_rate, median_inliers): доля принятия важнее, потому что
+    # число inlier-точек ниже порога §1.4 бесполезно в работе, даже если оно
+    # максимальное в сетке.
     best_pitch, best_med, best_mean, best_acc = max(
         pitch_scores, key=lambda x: (x[3], x[1])
     )
@@ -241,7 +239,7 @@ def main() -> None:
     print()
     print(summary_txt)
 
-    # Visual: BEV at best pitch + that frame's retriever-chosen satellite tile.
+    # Визуализация: BEV при лучшем pitch + выбранный retriever спутниковый тайл.
     mid_idx = sample_frames[len(sample_frames) // 2]
     frame_raw = proc.extract_frame(mid_idx)
     if frame_raw is not None:

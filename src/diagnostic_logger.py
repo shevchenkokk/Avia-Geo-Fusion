@@ -1,11 +1,11 @@
-"""Stage 1.1: per-frame diagnostic logger for the localization pipeline.
+"""Покадровый диагностический логгер пайплайна локализации.
 
-The logger writes one row per processed frame to a CSV and renders a
-4-panel summary plot at the end of a run. The schema is designed so a
-quick glance at the plot tells which of the documented failure modes
-(see PROJECT_PLAN.md §1) is dominating on a given flight.
+Логгер записывает одну строку на каждый обработанный кадр в CSV и в конце
+запуска строит сводный график из четырёх панелей. Формат подобран так, чтобы
+по графику быстро было видно, какой из описанных режимов отказа
+(см. PROJECT_PLAN.md §1) доминирует на конкретном пролёте.
 
-Usage::
+Пример использования::
 
     logger = DiagnosticLogger(output_dir=Path("results/diag/run_001"))
     for frame_idx, ...:
@@ -62,7 +62,7 @@ _FIELDS: tuple[str, ...] = (
 
 @dataclass
 class FrameDiagnostic:
-    """One row of the diagnostic CSV. Optional fields default to NaN/None."""
+    """Одна строка диагностического CSV. Необязательные поля по умолчанию NaN/None."""
 
     frame_idx: int
     timestamp_seconds: float
@@ -101,7 +101,7 @@ class FrameDiagnostic:
 
 
 class DiagnosticLogger:
-    """CSV + summary-plot logger for the localization pipeline."""
+    """Логгер CSV и сводных графиков для пайплайна локализации."""
 
     def __init__(self, output_dir: Path, run_name: str | None = None):
         self.output_dir = Path(output_dir)
@@ -233,9 +233,9 @@ class DiagnosticLogger:
         summary["plot"] = str(plot_path)
 
     def _render_state_timeline(self) -> None:
-        """A second plot: stacked timeline of state and reject reasons.
+        """Второй график: временная шкала состояния и причин отбраковки.
 
-        Makes the dominant failure mode obvious at a glance.
+        Нужен, чтобы основной источник сбоев был виден сразу.
         """
         if not self._rows:
             return
@@ -280,7 +280,7 @@ class DiagnosticLogger:
 
 
 def classify_state(num_inliers: int, inlier_ratio: float, reject_reason: str) -> str:
-    """Single source of truth for state classification."""
+    """Единое место, где определяется состояние трека."""
     if reject_reason or num_inliers <= 0:
         return "RELOCALIZE"
     if num_inliers >= 30 and inlier_ratio >= 0.30:
@@ -289,11 +289,12 @@ def classify_state(num_inliers: int, inlier_ratio: float, reject_reason: str) ->
 
 
 def homography_scale(H: np.ndarray | None) -> float:
-    """Geometric mean scale extracted from the 2x2 affine block of H.
+    """Средний геометрический масштаб из 2x2 affine-блока H.
 
-    Useful as a sanity check: a sudden 2x change between consecutive
-    successful frames usually means the matcher locked onto a wrong tile
-    region (e.g. a building cluster instead of the actual aircraft view).
+    Используется как грубая проверка: внезапное изменение в 2 раза между
+    соседними успешными кадрами обычно означает, что матчер зацепился за
+    неправильный участок тайла, например за группу зданий вместо реального
+    вида с самолёта.
     """
     if H is None:
         return float("nan")
@@ -307,7 +308,7 @@ def homography_scale(H: np.ndarray | None) -> float:
 def reprojection_error(
     pts0: np.ndarray, pts1: np.ndarray, H: np.ndarray | None
 ) -> float:
-    """Mean L2 distance after applying H to pts0 vs pts1 (pixels)."""
+    """Среднее L2-расстояние после применения H к pts0 относительно pts1, в пикселях."""
     if H is None or len(pts0) == 0:
         return float("nan")
     src = np.asarray(pts0, dtype=np.float64).reshape(-1, 1, 2)
@@ -322,12 +323,12 @@ def reprojection_error(
 
 
 def confidence_from_inliers(num_inliers: int, inlier_ratio: float, reproj_px: float) -> float:
-    """Heuristic confidence in [0, 1].
+    """Эвристическая уверенность в диапазоне [0, 1].
 
-    Combines (a) saturating function of inlier count, (b) raw inlier ratio,
-    (c) gentle penalty for high reprojection error. This is *not* a
-    Bayesian posterior — it's a single number that orders frames roughly
-    by how trustable their measurement is, useful for filter gating later.
+    Сочетает насыщаемую функцию от числа inlier-точек, сам inlier ratio и
+    мягкий штраф за большую ошибку репроекции. Это не байесовская вероятность,
+    а одно число для примерного ранжирования кадров по надёжности измерения;
+    дальше оно удобно для ворот фильтра.
     """
     if num_inliers <= 0 or not np.isfinite(inlier_ratio):
         return 0.0

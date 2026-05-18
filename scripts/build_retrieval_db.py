@@ -1,13 +1,13 @@
-"""Stage 3.5 step 1: build the satellite-tile retrieval reference DB.
+"""Этап 3.5, шаг 1: собрать reference-базу спутниковых тайлов для retrieval.
 
-Downloads a grid of ``zoom`` tiles (default z=14, ~1.4 km/tile at 55°N)
-covering the mission bbox, runs the Retriever's encoder on each, and
-saves the (descriptors, lat/lon centres, tile_ids) bundle to disk.
+Скачивает сетку тайлов ``zoom`` (по умолчанию z=14, ~1.4 км/тайл на 55°N),
+покрывающую bbox миссии, прогоняет каждый через encoder retriever и сохраняет
+на диск набор (descriptors, lat/lon центров, tile_ids).
 
-Output: data/retrieval/db_z{zoom}.{npz, json}
+Выход: data/retrieval/db_z{zoom}.{npz, json}
 
-Defaults are tuned for ~30 km × 30 km coverage around the GP010269
-takeoff coordinate, which spans the entire flight even with margin.
+Значения по умолчанию дают покрытие около 30 км × 30 км вокруг точки взлёта
+GP010269, чего хватает на весь полёт с запасом.
 """
 
 from __future__ import annotations
@@ -27,8 +27,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-# Workaround for the macOS Python certificate issue (see verify_undistort
-# experiment). torch.hub uses urllib which honours SSL_CERT_FILE.
+# Обход проблемы сертификатов в macOS Python (см. эксперимент verify_undistort).
+# torch.hub использует urllib, который учитывает SSL_CERT_FILE.
 try:
     import certifi  # type: ignore
     os.environ.setdefault("SSL_CERT_FILE", certifi.where())
@@ -40,7 +40,7 @@ from src.retriever import ReferenceDatabase, Retriever
 
 
 def _tile_center_latlon(tx: int, ty: int, z: int) -> tuple[float, float]:
-    """Centre lat/lon of a slippy-map tile (z, x, y)."""
+    """Центр slippy-map тайла (z, x, y) в lat/lon."""
     bounds = mercantile.bounds(mercantile.Tile(tx, ty, z))
     return (
         0.5 * (bounds.south + bounds.north),
@@ -79,7 +79,7 @@ def main() -> None:
     print(f"[db] output  : {db_path}.{{npz,json}}")
     print()
 
-    # 1. Generate tile coordinate list.
+    # 1. Генерируем список координат тайлов.
     tile_list = []
     for dy in range(-args.radius_tiles, args.radius_tiles + 1):
         for dx in range(-args.radius_tiles, args.radius_tiles + 1):
@@ -87,7 +87,7 @@ def main() -> None:
             ty = centre_tile.y + dy
             tile_list.append((tx, ty, args.zoom))
 
-    # 2. Download in parallel via MapDownloader.
+    # 2. Параллельно скачиваем через MapDownloader.
     print(f"[db] downloading {len(tile_list)} tiles...")
     loader = MapDownloader(zoom=args.zoom, max_workers=args.max_workers)
     t0 = time.time()
@@ -96,7 +96,7 @@ def main() -> None:
     failed = sum(1 for v in raw.values() if v is None)
     print(f"[db] downloaded in {dl_dt:.1f}s  failed={failed}/{len(tile_list)}")
 
-    # 3. Build descriptors.
+    # 3. Строим дескрипторы.
     print(f"[db] loading {Retriever.__name__} ...")
     retr = Retriever(device=args.device)
     print(f"[db] device  : {retr.device}")

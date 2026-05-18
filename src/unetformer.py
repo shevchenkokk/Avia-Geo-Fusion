@@ -113,18 +113,18 @@ class GlobalLocalAttention(nn.Module):
         self.relative_pos_embedding = relative_pos_embedding
 
         if self.relative_pos_embedding:
-            # define a parameter table of relative position bias
+            # Таблица обучаемых смещений относительного положения
             self.relative_position_bias_table = nn.Parameter(
                 torch.zeros((2 * window_size - 1) * (2 * window_size - 1), num_heads))  # 2*Wh-1 * 2*Ww-1, nH
 
-            # get pair-wise relative position index for each token inside the window
+            # Индекс относительного положения для каждой пары токенов внутри окна
             coords_h = torch.arange(self.ws)
             coords_w = torch.arange(self.ws)
             coords = torch.stack(torch.meshgrid([coords_h, coords_w]))  # 2, Wh, Ww
             coords_flatten = torch.flatten(coords, 1)  # 2, Wh*Ww
             relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]  # 2, Wh*Ww, Wh*Ww
             relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # Wh*Ww, Wh*Ww, 2
-            relative_coords[:, :, 0] += self.ws - 1  # shift to start from 0
+            relative_coords[:, :, 0] += self.ws - 1  # сдвигаем, чтобы индексы начинались с 0
             relative_coords[:, :, 1] += self.ws - 1
             relative_coords[:, :, 0] *= 2 * self.ws - 1
             relative_position_index = relative_coords.sum(-1)  # Wh*Ww, Wh*Ww

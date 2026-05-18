@@ -1,4 +1,4 @@
-"""Этап 3.5: визуальный ретривер (DINOv2-B + косинусный NN).
+"""Визуальный ретривер (DINOv2-B + косинусный NN).
 
 Решает задачу бутстрапа: в начале полёта (или после потери трека) нужна
 грубая абсолютная позиция для центрирования тайлового окна MapManager
@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -26,6 +27,7 @@ _DINOV2_REPO = "facebookresearch/dinov2"
 _DINOV2_ENTRY = "dinov2_vitb14"
 _DESCRIPTOR_DIM = 768
 _INPUT_SIZE = 224  # сетка 16×16 патчей при patch_size=14
+_DINOV2_CACHE_DIR = "facebookresearch_dinov2_main"
 
 # Нормировка ImageNet (ожидаемая статистика DINOv2).
 _MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32) * 255.0
@@ -44,6 +46,28 @@ def _select_device(prefer: str = "auto") -> str:
     if torch.backends.mps.is_available():
         return "mps"
     return "cpu"
+
+
+def _torch_hub_dir() -> Path:
+    return Path(os.environ.get("TORCH_HOME", Path.home() / ".cache" / "torch")) / "hub"
+
+
+def _load_dinov2(model_name: str) -> torch.nn.Module:
+    cache_dir = _torch_hub_dir() / _DINOV2_CACHE_DIR
+    if cache_dir.exists():
+        return torch.hub.load(
+            str(cache_dir),
+            model_name,
+            source="local",
+            verbose=False,
+        )
+    return torch.hub.load(
+        _DINOV2_REPO,
+        model_name,
+        verbose=False,
+        trust_repo=True,
+        skip_validation=True,
+    )
 
 
 @dataclass
@@ -121,9 +145,7 @@ class Retriever:
         self.input_size = int(input_size)
         self.model_name = model_name
 
-        self.model = torch.hub.load(
-            _DINOV2_REPO, model_name, verbose=False, trust_repo=True,
-        ).to(self.device).eval()
+        self.model = _load_dinov2(model_name).to(self.device).eval()
         self._db: Optional[ReferenceDatabase] = None
 
     def load_database(self, path: Path | str) -> None:
@@ -178,7 +200,7 @@ class Retriever:
         return self._db.query(descriptor, top_k=top_k)
 
     def query_image(self, img_bgr: np.ndarray, top_k: int = 5) -> list[dict]:
-        """End-to-end: кодирование + косинусный NN. Возвращает список словарей
+        """Полный проход: кодирование + косинусный NN. Возвращает список словарей
         с ключами ``index``, ``score``, ``lat``, ``lon``, ``tile_id``.
         """
         if self._db is None:

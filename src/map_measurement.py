@@ -1,4 +1,4 @@
-"""Этап 2.6: фиксация карты как источник измерения, а не сглаживатель.
+"""Фиксация карты как источник измерения, а не сглаживатель.
 
 В v0 ``Geolocator`` запускал внутренний Kalman/EMA на сырых выходах гомографии
 и возвращал одну сглаженную (lat, lon). Это смешивало две ответственности:
@@ -29,7 +29,7 @@ import numpy as np
 from src.frame_bridge import FrameBridge
 
 
-# Пороги Stage 1.4, продублированы для автономности модуля.
+# Пороги этапа 1.4, продублированы для автономности модуля.
 DEFAULT_MIN_MATCHES = 4
 DEFAULT_MIN_INLIERS = 8
 DEFAULT_MIN_INLIER_RATIO = 0.15
@@ -43,7 +43,7 @@ class MapMeasurement:
     accepted: bool = False
     reject_reason: str = ""
 
-    # Геометрия (валидна только при accepted=True).
+    # Геометрия (валидна только если accepted=True).
     lat: float = float("nan")
     lon: float = float("nan")
     sigma_xy_m: float = float("nan")
@@ -172,7 +172,7 @@ def compute_map_measurement(
     """RANSAC-гомография на выходе матчера + формирование ``MapMeasurement``.
 
     Чистая функция без состояния и Калмана.
-    Ворота качества Stage 1.4 применяются здесь. Скоростной лимит Stage 1.4
+    Ворота качества этапа 1.4 применяются здесь. Скоростной лимит этапа 1.4
     намеренно убран: это теперь задача ворот Махаланобиса EKF.
     """
     out = MapMeasurement(num_matches=int(len(mkpts_drone)))
@@ -197,7 +197,7 @@ def compute_map_measurement(
     out.homography = H
     out.inlier_mask = mask
 
-    # Ворота Stage 1.4.
+    # Ворота этапа 1.4.
     if num_inliers < min_inliers:
         out.reject_reason = "too_few_inliers"
         return out

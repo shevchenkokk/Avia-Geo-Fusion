@@ -1,22 +1,22 @@
-"""Stage 2.6 verification: prove the new ``compute_map_measurement`` +
-EKF pipe produces the same trajectory quality as the legacy
-EMA-smoothed Geolocator, on synthetic data with known truth.
+"""Проверка этапа 2.6: доказать на синтетике с известной истиной, что новый
+путь ``compute_map_measurement`` + EKF даёт качество траектории не хуже старого
+Geolocator со сглаживанием EMA.
 
-Two stages:
+Два этапа:
 
-  Stage A — pointwise correctness. Build synthetic
-  (mkpts_drone, mkpts_map) pairs from a known homography that
-  represents an aircraft above a tile centre, run
-  ``compute_map_measurement``, confirm the recovered (lat, lon)
-  matches the analytic projection within sub-pixel error and
-  σ_xy_m falls in the expected range.
+  Этап A — поточечная корректность. Строятся синтетические пары
+  (mkpts_drone, mkpts_map) по известной гомографии, соответствующей самолёту
+  над центром тайла. Затем запускается ``compute_map_measurement`` и
+  проверяется, что восстановленные (lat, lon) совпадают с аналитической
+  проекцией в пределах субпиксельной ошибки, а σ_xy_m попадает в ожидаемый
+  диапазон.
 
-  Stage B — end-to-end fusion. Simulate a 2-minute cruise. Each
-  second produces a synthetic MapMeasurement (matcher noise +
-  varying inlier counts). Feed into ``StateFilter`` via
-  ``apply_to_state_filter``; check the filter trajectory tracks
-  truth within the §2.6 expectation (no EMA, smoothing entirely
-  in EKF -> position error stays bounded by σ_xy_m).
+  Этап B — end-to-end fusion. Моделируется двухминутный крейсерский участок.
+  Каждую секунду создаётся синтетический MapMeasurement с шумом матчера и
+  разным числом inlier-точек. Он подаётся в ``StateFilter`` через
+  ``apply_to_state_filter``; проверяется, что траектория фильтра держится
+  возле истины в рамках ожиданий §2.6: без EMA, всё сглаживание внутри EKF,
+  ошибка позиции остаётся ограниченной σ_xy_m.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ from src.map_measurement import (
 
 
 # ---------------------------------------------------------------------------
-# Synthetic homography helpers
+# Вспомогательные функции для синтетической гомографии
 # ---------------------------------------------------------------------------
 
 def _make_synthetic_match_pair(
@@ -56,35 +56,35 @@ def _make_synthetic_match_pair(
     noise_px: float = 1.0,
     rng: np.random.Generator | None = None,
 ):
-    """Build (mkpts_drone, mkpts_map) consistent with a homography that
-    maps the drone-frame centre onto the map pixel that corresponds to
-    (truth_lat, truth_lon). The homography is a similarity (scale +
-    translation) for simplicity; a real matcher's H is more general
-    but the centre-projection logic is the same.
+    """Построить (mkpts_drone, mkpts_map), согласованные с гомографией.
+
+    Гомография переводит центр кадра самолёта в пиксель карты, соответствующий
+    (truth_lat, truth_lon). Для простоты это similarity-преобразование
+    (масштаб + сдвиг); у реального матчера H более общая, но логика проекции
+    центра такая же.
     """
     if rng is None:
         rng = np.random.default_rng(seed=0)
     west, south, east, north = bbox
     h, w = map_shape[:2]
 
-    # Map the truth point to a satellite-tile pixel (the inverse of
-    # _pixel_to_gps).
+    # Переводим истинную точку в пиксель спутникового тайла, обратно к _pixel_to_gps.
     map_x = (truth_lon - west) / max(east - west, 1e-9) * w
     map_y = (north - truth_lat) / max(north - south, 1e-9) * h
 
-    # Drone-frame centre.
+    # Центр кадра самолёта.
     fh, fw = frame_shape[:2]
     cx_d, cy_d = fw / 2.0, fh / 2.0
 
-    # Synthetic uniform drone keypoints on a margin.
+    # Синтетические равномерные ключевые точки самолёта с отступом от края.
     drone_pts = rng.uniform(low=[fw * 0.15, fh * 0.15],
                             high=[fw * 0.85, fh * 0.85],
                             size=(n_kpts, 2)).astype(np.float32)
 
-    # Pick a similarity H: scale s = (map_extent_px / frame_extent_px),
-    # rotation 0, translation puts (cx_d, cy_d) onto (map_x, map_y).
-    # Use a scale chosen so a 1920-px frame covers a reasonable patch
-    # of the tile (e.g., ~50 % of width).
+    # Берём similarity H: масштаб s = map_extent_px / frame_extent_px,
+    # поворот 0, сдвиг кладёт (cx_d, cy_d) в (map_x, map_y). Масштаб выбран так,
+    # чтобы кадр шириной 1920 пикселей покрывал разумный участок тайла,
+    # например около 50 % ширины.
     s = (0.5 * w) / fw  # frame-pixel -> map-pixel
     H_truth = np.array([
         [s, 0, map_x - s * cx_d],
@@ -92,7 +92,7 @@ def _make_synthetic_match_pair(
         [0, 0, 1],
     ], dtype=np.float32)
 
-    # Project drone points to map under H, add noise.
+    # Проецируем точки самолёта на карту через H и добавляем шум.
     drone_h = np.column_stack([drone_pts, np.ones(len(drone_pts), dtype=np.float32)])
     map_h = (H_truth @ drone_h.T).T
     map_pts = (map_h[:, :2] / map_h[:, 2:3]).astype(np.float32)
@@ -101,15 +101,15 @@ def _make_synthetic_match_pair(
 
 
 # ---------------------------------------------------------------------------
-# Stage A — pointwise correctness
+# Этап A — поточечная корректность
 # ---------------------------------------------------------------------------
 
 def stage_a(rng_seed: int = 11) -> dict:
     rng = np.random.default_rng(seed=rng_seed)
-    # Realistic z=17 tile near Kolomna: ~1.1 m/pixel at 55°N, so a
-    # 2000x2000 px tile spans ~2.2 km on each axis. Pixel-level
-    # reprojection error of 1 px maps to ~1 m here, which is the
-    # right scale for σ_xy_m derivation.
+    # Реалистичный тайл z=17 около Коломны: ~1.1 м/пикс при 55°N, так что
+    # тайл 2000x2000 пикс покрывает около 2.2 км по каждой оси. Ошибка
+    # репроекции 1 пикс здесь соответствует примерно 1 м — правильный масштаб
+    # для вывода σ_xy_m.
     bbox = (38.140, 55.080, 38.175, 55.100)
     map_shape = (2000, 2000)
 
@@ -127,7 +127,7 @@ def stage_a(rng_seed: int = 11) -> dict:
         if not meas.accepted:
             rows.append((lat_t, lon_t, meas, None, None))
             continue
-        # Convert error to metres.
+        # Переводим ошибку в метры.
         d_lat_m = (meas.lat - lat_t) * 111320.0
         d_lon_m = (meas.lon - lon_t) * 111320.0 * math.cos(math.radians(lat_t))
         err_m = math.hypot(d_lat_m, d_lon_m)
@@ -150,22 +150,22 @@ def stage_a(rng_seed: int = 11) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Stage B — end-to-end fusion replacing the EMA path
+# Этап B — end-to-end fusion вместо старого пути с EMA
 # ---------------------------------------------------------------------------
 
 def stage_b(rng_seed: int = 22) -> dict:
     rng = np.random.default_rng(seed=rng_seed)
     bridge = FrameBridge(55.086025, 38.149033, 130.0)
-    # Realistic z=17 tile near Kolomna: ~1.1 m/pixel at 55°N, so a
-    # 2000x2000 px tile spans ~2.2 km on each axis. Pixel-level
-    # reprojection error of 1 px maps to ~1 m here, which is the
-    # right scale for σ_xy_m derivation.
+    # Реалистичный тайл z=17 около Коломны: ~1.1 м/пикс при 55°N, так что
+    # тайл 2000x2000 пикс покрывает около 2.2 км по каждой оси. Ошибка
+    # репроекции 1 пикс здесь соответствует примерно 1 м — правильный масштаб
+    # для вывода σ_xy_m.
     bbox = (38.140, 55.080, 38.175, 55.100)
     map_shape = (2000, 2000)
-    # Stage B fuses 2 minutes of cruise at 70 m/s = ~8.4 km — too
-    # large for a single z=17 tile. We keep tile-scale realism in
-    # stage A and switch to a larger bbox here so the synthetic
-    # truth track stays inside a single map throughout.
+    # Этап B объединяет 2 минуты крейсера на 70 м/с, то есть ~8.4 км —
+    # слишком много для одного тайла z=17. В этапе A сохраняем реализм тайла,
+    # а здесь берём более крупный bbox, чтобы синтетическая истинная траектория
+    # целиком оставалась внутри одной карты.
     bbox_b = (38.05, 55.05, 38.25, 55.15)
     map_shape_b = (2048, 2048)
 
@@ -186,7 +186,7 @@ def stage_b(rng_seed: int = 22) -> dict:
     map_steps = int(round(map_period_s / of_dt))
     n_steps = int(round(duration / of_dt))
 
-    # Truth trajectory in WGS84.
+    # Истинная траектория в WGS84.
     vx_e_t = speed * math.sin(yaw_r)
     vy_n_t = speed * math.cos(yaw_r)
 
@@ -201,8 +201,8 @@ def stage_b(rng_seed: int = 22) -> dict:
         x_truth = vx_e_t * t_acc
         y_truth = vy_n_t * t_acc
 
-        # Synthetic OF (unbiased to keep this stage focused on the
-        # map_measurement path; biased VO is exercised in Stage 2.5).
+        # Синтетический OF без смещения: здесь проверяется путь map_measurement,
+        # а VO со смещением отдельно покрыт в этапе 2.5.
         sigma_v = 1.5
         v_raw = np.array([speed + rng.normal(0, sigma_v), rng.normal(0, sigma_v)])
         f.update_of_velocity(v_raw, rng.normal(0, math.radians(0.3)),
@@ -210,9 +210,8 @@ def stage_b(rng_seed: int = 22) -> dict:
                              sigma_yaw_rate_radps=math.radians(0.5))
 
         if k % map_steps == 0:
-            # Build a synthetic match pair around truth, sometimes
-            # with reduced quality (low inliers) so we exercise the
-            # σ_xy adaptation.
+            # Строим синтетическую пару вокруг истины, иногда с ухудшенным
+            # качеством и малым числом inlier-точек, чтобы проверить адаптацию σ_xy.
             n_kpts = int(rng.choice([60, 30, 15]))
             noise_px = float(rng.choice([1.0, 1.5, 2.5]))
             lat_t, lon_t, _ = bridge.enu_to_wgs84(x_truth, y_truth, 0.0)

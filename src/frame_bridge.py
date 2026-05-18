@@ -1,19 +1,17 @@
-"""ENU <-> WGS84 frame bridge (flat-Earth approximation).
+"""Переход ENU <-> WGS84 в приближении плоской Земли.
 
-The state filter (src/ekf.py) operates in a *local* East-North-Up
-(ENU) Cartesian frame anchored at a single mission origin. All map
-fixes are reported in WGS84 (lat, lon) and need to be lifted into ENU
-before being fed to the filter; conversely, the filter's position
-state is lowered back to WGS84 when querying tiles or DEM.
+Фильтр состояния (src/ekf.py) работает в локальной декартовой системе
+East-North-Up (ENU), привязанной к одной точке старта миссии. Все map-fix
+приходят в WGS84 (lat, lon), поэтому перед подачей в фильтр их нужно поднять
+в ENU. Обратно, позиция фильтра переводится из ENU в WGS84 при запросе тайлов
+или DEM.
 
-For a flight bbox of ~50 km the flat-Earth approximation is good to
-better than 1 m — well below the matcher's expected position
-accuracy and the DEM's vertical accuracy. If a future mission grows
-beyond ~200 km the right answer is to switch to a proper ECEF-based
-ENU bridge with ellipsoidal lat/lon; for now we keep it simple.
+Для области полёта порядка 50 км плоское приближение даёт ошибку меньше
+метра — заметно ниже ожидаемой точности матчера и вертикальной точности DEM.
+Если будущая миссия вырастет за ~200 км, правильнее будет перейти на мост ENU
+через ECEF с эллипсоидальными lat/lon. Пока оставляем простой вариант.
 
-All units: metres for ENU, decimal degrees for lat/lon, metres MSL
-for altitude.
+Единицы: метры для ENU, десятичные градусы для lat/lon, метры MSL для высоты.
 """
 
 from __future__ import annotations
@@ -31,11 +29,11 @@ _METERS_PER_DEG_LAT = 111320.0
 
 @dataclass(frozen=True)
 class FrameBridge:
-    """Anchored at (lat0, lon0, alt0_msl).
+    """Привязка к точке (lat0, lon0, alt0_msl).
 
-    ENU frame: x_e = east, y_n = north, z_u = up. The origin is on
-    the ground at the anchor point — i.e. ``z_u = 0`` is at the
-    anchor's MSL elevation. Aircraft altitude in ENU is therefore
+    Система ENU: x_e = восток, y_n = север, z_u = вверх. Начало координат
+    лежит на земле в точке привязки, то есть ``z_u = 0`` соответствует высоте
+    MSL этой точки. Высота самолёта в ENU поэтому равна
     ``alt_msl - alt0_msl``.
     """
 

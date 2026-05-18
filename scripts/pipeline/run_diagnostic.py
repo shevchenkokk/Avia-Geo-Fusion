@@ -1,19 +1,18 @@
-"""Stage 1.1 orchestrator: per-frame diagnostic CSV + summary plots.
+"""Оркестратор этапа 1.1: покадровый диагностический CSV и сводные графики.
 
-Runs the localization pipeline (matcher → geolocator) over a video, writes
-one row per processed frame to a CSV, and emits two diagnostic plots that
-make the dominant failure mode (out of the six listed in PROJECT_PLAN.md
-§1) readable at a glance.
+Запускает пайплайн локализации (matcher → geolocator) по видео, пишет одну
+строку CSV на каждый обработанный кадр и строит два диагностических графика,
+по которым быстро видно доминирующий режим отказа из шести, перечисленных в
+PROJECT_PLAN.md §1.
 
-Important: this is a *diagnostic* runner, not the operational pipeline.
-It deliberately runs every frame through the matcher (no LK shortcut) so
-the inlier/ratio/reproj curves reflect the matcher's behaviour rather
-than the optical-flow propagator's. Speed is therefore lower than
-``run_hud_video.py``; for fast iteration use ``--max-seconds`` and
-``--fps``.
+Важно: это *диагностический* runner, а не рабочий пайплайн. Он намеренно
+прогоняет каждый кадр через matcher без LK-ускорения, чтобы кривые
+inlier/ratio/reproj отражали поведение матчера, а не протяжки по optical flow.
+Поэтому он медленнее ``run_hud_video.py``; для быстрых итераций используйте
+``--max-seconds`` и ``--fps``.
 
-Outputs land in ``results/diag/<run_name>/``:
-    frames_<run>.csv             — full per-frame trace
+Выходы пишутся в ``results/diag/<run_name>/``:
+    frames_<run>.csv             — полный покадровый trace
     summary_<run>.png            — 4-panel inliers/ratio/reproj/scale plot
     state_timeline_<run>.png     — TRACK/WEAK/RELOC + reject reasons over time
     summary_<run>.txt            — human-readable rollup
@@ -36,7 +35,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.aircraft_mask import AircraftMaskTracker
+from src.aircraft_mask import AircraftMaskTracker, load_aircraft_mask_tracker_for_video
 from src.diagnostic_logger import (
     DiagnosticLogger,
     FrameDiagnostic,
@@ -58,13 +57,13 @@ def _tile_id(map_manager: MapManager) -> str:
 
 
 def _count_keypoints(img: np.ndarray, max_kp: int = 4096) -> int:
-    """Cheap density proxy for ``num_keypoints_*``: ORB count.
+    """Дешёвая прокси-метрика плотности для ``num_keypoints_*``: число ORB.
 
-    The matcher itself doesn't expose a separate "frame keypoint count"
-    that's comparable across LightGlue/LoFTR/ORB backends, so we fall
-    back on a lightweight ORB detector to give the diagnostic plot a
-    *texture density* signal — useful when reading whether a low
-    inlier count was caused by lack of texture vs by matcher failure.
+    Сам matcher не отдаёт отдельное число keypoints кадра, сравнимое между
+    backend'ами LightGlue/LoFTR/ORB, поэтому используем лёгкий ORB-детектор.
+    Он даёт для диагностического графика сигнал *плотности текстуры* — это
+    помогает понять, низкое число inlier-точек вызвано нехваткой текстуры или
+    сбоем матчера.
     """
     if img is None:
         return -1
@@ -114,8 +113,9 @@ def run(args: argparse.Namespace) -> None:
     if args.anchors_dir is not None:
         anchors_dir = Path(args.anchors_dir)
         if (anchors_dir / "index.json").exists():
-            mask_tracker = AircraftMaskTracker.from_index(anchors_dir)
-            print(f"[diag] aircraft mask tracker: {mask_tracker.num_anchors()} anchors from {anchors_dir}")
+            mask_tracker = load_aircraft_mask_tracker_for_video(anchors_dir, video_path)
+            if mask_tracker is not None:
+                print(f"[diag] aircraft mask tracker: {mask_tracker.num_anchors()} anchors from {anchors_dir}")
         else:
             print(f"[diag] WARNING: --anchors-dir set but {anchors_dir/'index.json'} missing; "
                   f"running WITHOUT aircraft mask")
@@ -156,12 +156,12 @@ def run(args: argparse.Namespace) -> None:
 
         aircraft_mask = None
         if mask_tracker is not None:
-            aircraft_mask = mask_tracker.mask_for_frame(cur, frame.shape[:2])
+            aircraft_mask = mask_tracker.mask_for_frame(cur, frame.shape[:2], frame=frame)
 
-        # Stage 1.5 gate: detect cloud / glare / blur before the matcher.
-        # If obstructed, we skip the matcher entirely — running it on a
-        # near-uniform frame produces invented matches that corrupt the
-        # Kalman state. The bbox keeps drifting through predict_only().
+        # Ворота этапа 1.5: детектируем облако / блик / размытие до матчера.
+        # Если кадр перекрыт, полностью пропускаем matcher: на почти однородном
+        # кадре он придумывает совпадения, которые портят состояние Калмана.
+        # bbox продолжает дрейфовать через predict_only().
         obstr_result = None
         if obstruction_detector is not None:
             obstr_result = obstruction_detector.detect(frame, aircraft_mask=aircraft_mask)
@@ -205,11 +205,10 @@ def run(args: argparse.Namespace) -> None:
 
         new_map_cv2, new_bbox = (map_cv2, bbox)
         tile_changed = False
-        # Stage 1.3: feed MapManager the best-available position every frame.
-        # If the current frame produced a valid lock, use it. Otherwise fall
-        # back to the Kalman dead-reckoning prediction so the bbox keeps
-        # drifting along the expected trajectory through track-loss windows
-        # rather than freezing at the last lock.
+        # Этап 1.3: каждый кадр отдаём MapManager лучшую доступную позицию.
+        # Если текущий кадр дал валидный lock, используем его. Иначе берём
+        # прогноз Калмана по счислению пути, чтобы bbox дрейфовал вдоль ожидаемой
+        # траектории в окнах потери трека, а не замирал на последнем lock.
         if gps is not None:
             update_lat, update_lon = gps[0], gps[1]
         else:

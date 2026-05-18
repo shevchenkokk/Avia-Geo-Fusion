@@ -1,30 +1,31 @@
-"""Stage 4 lite: snow-region mask for seasonally-robust matching.
+"""Маска снега для более устойчивого сезонного матчинга.
 
-The cross-seasonal gap (winter drone footage vs summer/autumn
-satellite tiles) makes feature matching unreliable on the snow itself
-— large textureless regions where every matcher finds either no
-features or random consensus matches. Stable across seasons:
+Разрыв между сезонами (зимнее видео с самолёта против летних/осенних
+спутниковых тайлов) делает сопоставление по самому снегу ненадёжным:
+это большие области почти без текстуры, где матчер либо не находит признаки,
+либо собирает случайные согласованные совпадения. Между сезонами стабильнее:
 
-  * roads        (asphalt or dirt, visible through snow)
-  * tree clusters / forest edges
-  * built-up structures
-  * field boundaries (fences, hedges, watercourses)
+  * дороги (асфальт или грунт, часто заметны через снег)
+  * группы деревьев и границы леса
+  * застройка
+  * границы полей: заборы, посадки, канавы и ручьи
 
-The snow surface itself is unstable: heavily textureless under snow,
-green / brown / yellow under summer satellite. Removing snow pixels
-focuses the matcher on the seasonally-stable subset.
+Сама снежная поверхность нестабильна: зимой она почти без текстуры, а на
+летнем спутниковом снимке становится зелёной, коричневой или жёлтой.
+Удаление снежных пикселей заставляет матчер работать по более стабильным
+объектам.
 
-Detection is intentionally cheap and conservative — a single HSV
-threshold rather than a learned segmenter:
+Детектор специально сделан простым и консервативным: один порог в HSV вместо
+обученной сегментации:
 
     snow = (V > v_threshold) AND (S < s_threshold)
 
-Defaults are tuned for GoPro footage at noon over snowy fields in
-central Russia. Bright sun on snow reaches V > 0.9 with S < 0.10;
-darker shadowed snow drops to V ~ 0.7 with S still < 0.15. The
-threshold trades false positives (some bright sky/asphalt flagged as
-snow) against false negatives (missed snow). Bias toward false
-positives — losing a few matches is cheaper than including snow noise.
+Значения по умолчанию подобраны под дневную GoPro-съёмку над снежными полями
+в центральной России. Яркий снег на солнце даёт V > 0.9 при S < 0.10;
+снег в тени падает до V ~ 0.7, но S обычно остаётся < 0.15. Порог балансирует
+между ложными срабатываниями и пропущенным снегом. Смещение сделано в сторону
+ложных срабатываний: потерять несколько совпадений дешевле, чем пустить шум
+от снега в матчер.
 """
 
 from __future__ import annotations
@@ -39,11 +40,11 @@ def detect_snow_mask(
     s_threshold: float = 0.15,
     morph_kernel: int = 5,
 ) -> np.ndarray:
-    """Return a uint8 0/255 mask where 255 = snow.
+    """Вернуть uint8-маску 0/255, где 255 означает снег.
 
-    Both thresholds are normalised to [0, 1]. ``morph_kernel`` size>0
-    closes small holes inside snow regions and removes single-pixel
-    speckle, producing cleaner mask boundaries; set to 0 to skip.
+    Оба порога нормированы в [0, 1]. ``morph_kernel`` больше нуля закрывает
+    мелкие дырки внутри снежных областей и убирает одиночный шум, делая
+    границы маски чище. Значение 0 отключает морфологию.
     """
     if img_bgr.ndim == 2:
         img_bgr = cv2.cvtColor(img_bgr, cv2.COLOR_GRAY2BGR)
@@ -60,11 +61,11 @@ def detect_snow_mask(
 def combine_with_aircraft_mask(
     snow_mask: np.ndarray, aircraft_mask: np.ndarray | None
 ) -> np.ndarray:
-    """OR-combine snow + aircraft no-go regions into a single mask.
+    """Объединить снег и запретную область самолёта в одну маску через OR.
 
-    Returns a uint8 0/255 mask where 255 marks pixels the matcher must
-    NOT use. The matcher's aircraft_mask parameter consumes this format
-    directly.
+    Возвращает uint8-маску 0/255, где 255 отмечает пиксели, которые матчер
+    не должен использовать. Параметр ``aircraft_mask`` у матчера принимает
+    ровно такой формат.
     """
     if aircraft_mask is None:
         return snow_mask

@@ -22,11 +22,11 @@ def test_loftr():
     map_img_pil, _ = map_loader.get_basemap_for_location(pos_t0.latitude, pos_t0.longitude, radius_tiles=1)
     map_cv2 = cv2.cvtColor(np.array(map_img_pil), cv2.COLOR_RGB2BGR)
     
-    # Инициализация нейросети
-    print("\n[AI] Инициализация LoFTR...")
+    # Инициализация нейросетевого сопоставителя
+    print("\n[matcher] Инициализация LoFTR...")
     matcher = NeuralMatcher()
     
-    print("\n[AI] Прогрев и поиск (первый запуск может занять несколько секунд)...")
+    print("\n[matcher] Прогрев и поиск (первый запуск может занять несколько секунд)...")
     t0 = time.time()
     result = matcher.match(frame_drone, map_cv2)
     t1 = time.time()

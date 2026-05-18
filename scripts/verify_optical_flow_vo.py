@@ -1,29 +1,30 @@
-"""Stage 2.2 verification: prove the optical-flow VO recovers metric
-velocity correctly under known motion, and produces sane numbers on a
-real cruise segment of GP010269.MP4.
+"""Проверка этапа 2.2: убедиться, что VO по optical flow корректно
+восстанавливает метрическую скорость на известном движении и даёт адекватные
+числа на реальном крейсерском участке GP010269.MP4.
 
-Three stages:
+Три этапа:
 
-  1. **Geometry round-trip** — bypass LK entirely. Synthesize ground
-     points in body frame, project to pixels via the inverse ray-cast,
-     undistort + re-ray-cast, confirm the body coordinates round-trip
-     to within ~mm. Then fit a rigid transform on a synthetic motion
-     and confirm the recovered (Δt, Δyaw) matches truth.
+  1. **Geometry round-trip** — полностью обходим LK. Синтезируем точки земли
+     в СК тела, проецируем их в пиксели через обратный ray-cast, затем делаем
+     undistort + повторный ray-cast и проверяем, что координаты в СК тела
+     возвращаются с точностью порядка миллиметров. После этого подгоняем
+     rigid-transform на синтетическом движении и сверяем восстановленные
+     (Δt, Δyaw) с истиной.
 
-  2. **Synthetic LK pair** — generate a pair of frames under known
-     body motion using the actual fisheye projection, run the full
-     VO step (LK + ray-cast + RANSAC fit), confirm the recovered
-     velocity matches truth within 2-5 % (the §2.2 criterion).
+  2. **Synthetic LK pair** — генерируем пару кадров при известном движении
+     самолёта через настоящую fisheye-проекцию, запускаем полный шаг VO
+     (LK + ray-cast + RANSAC fit) и проверяем, что восстановленная скорость
+     совпадает с истиной в пределах 2-5 % — критерий §2.2.
 
-  3. **Real cruise sanity** — pick a clean cruise segment in
-     GP010269.MP4 (after frost clears, before maneuvers), run VO at
-     the source frame rate, report median speed and yaw-rate stability.
-     Without telemetry we can't enforce the "≤2 % drift" half of the
-     criterion; this stage demonstrates that the magnitudes are in
-     the expected fixed-wing range (50-100 m/s, |yaw rate| < 5°/s).
+  3. **Real cruise sanity** — берём чистый крейсерский участок GP010269.MP4
+     после ухода наледи и до манёвров, запускаем VO на исходной частоте кадров
+     и выводим медианную скорость и стабильность yaw-rate. Без телеметрии
+     нельзя строго проверить часть критерия про «≤2 % drift»; этот этап
+     показывает, что величины лежат в ожидаемом диапазоне самолёта:
+     50-100 м/с и |yaw rate| < 5°/с.
 
-The verification PASSES when stages 1 and 2 meet their numeric tols.
-Stage 3 is reported but advisory.
+Проверка считается пройденной, если этапы 1 и 2 укладываются в численные
+допуски. Этап 3 выводится справочно.
 """
 
 from __future__ import annotations
@@ -51,7 +52,7 @@ from src.optical_flow_vo import (
 
 
 # ---------------------------------------------------------------------------
-# Helpers — forward camera projection (body XYZ -> pixel) for tests
+# Вспомогательные функции: прямая проекция камеры (body XYZ -> pixel) для тестов
 # ---------------------------------------------------------------------------
 
 def project_body_to_pixel(
@@ -60,14 +61,13 @@ def project_body_to_pixel(
     K: np.ndarray,
     D: np.ndarray,
 ) -> np.ndarray:
-    """Inverse of ray_cast_ground + fisheye_undistort_points.
+    """Обратная операция к ray_cast_ground + fisheye_undistort_points.
 
-    pts_body : (N, 3) float64. Returns (N, 2) pixel coords.
+    pts_body: (N, 3) float64. Возвращает пиксельные координаты (N, 2).
     """
     R_b2c = R_c2b.T
-    pts_cam = (R_b2c @ pts_body.T).T  # (N, 3) in camera frame
-    # Drop points that are behind the camera (z<=0) — they have no
-    # valid projection.
+    pts_cam = (R_b2c @ pts_body.T).T  # (N, 3) в системе камеры
+    # Отбрасываем точки позади камеры (z<=0): для них нет валидной проекции.
     valid = pts_cam[:, 2] > 1e-6
     pts_cam = pts_cam[valid]
     if len(pts_cam) == 0:
@@ -86,26 +86,26 @@ def load_camera(path: Path) -> tuple[np.ndarray, np.ndarray, tuple[int, int]]:
 
 
 # ---------------------------------------------------------------------------
-# Stage 1 — geometry round-trip
+# Этап 1 — geometry round-trip
 # ---------------------------------------------------------------------------
 
 def stage1_geometry(K, D, image_size, pitch_deg, agl, vx_truth, vy_truth, dt) -> dict:
     R_c2b = camera_to_body_rotation(pitch_deg)
-    # Sample a grid of body-frame ground points within the camera footprint.
-    # For pitch ~ -30, AGL ~ 500m, the camera sees ~hundred metres ahead and
-    # tens-of-metres laterally. Pick a 10x6 grid in body XY at z=AGL.
-    xs = np.linspace(50, 600, 10)            # forward distance, metres
-    ys = np.linspace(-150, 150, 6)           # lateral, metres
+    # Берём сетку наземных точек в СК тела внутри footprint камеры. При
+    # pitch ~ -30 и AGL ~ 500 м камера видит сотни метров вперёд и десятки
+    # метров вбок. Используем сетку 10x6 в body XY при z=AGL.
+    xs = np.linspace(50, 600, 10)            # расстояние вперёд, м
+    ys = np.linspace(-150, 150, 6)           # боковое расстояние, м
     X, Y = np.meshgrid(xs, ys)
     pts_b_prev = np.column_stack([X.ravel(), Y.ravel(),
                                   np.full(X.size, agl)])
-    # After dt seconds of motion (velocity (vx, vy)), the same physical
-    # ground points are now at body-frame XY = prev - v*dt.
+    # Через dt секунд движения со скоростью (vx, vy) те же физические точки
+    # земли находятся в body-frame XY = prev - v*dt.
     pts_b_curr = pts_b_prev.copy()
     pts_b_curr[:, 0] -= vx_truth * dt
     pts_b_curr[:, 1] -= vy_truth * dt
 
-    # Forward-project both to pixels.
+    # Проецируем оба набора в пиксели.
     px_prev = project_body_to_pixel(pts_b_prev, R_c2b, K, D)
     px_curr = project_body_to_pixel(pts_b_curr, R_c2b, K, D)
     n = min(len(px_prev), len(px_curr))
@@ -114,23 +114,23 @@ def stage1_geometry(K, D, image_size, pitch_deg, agl, vx_truth, vy_truth, dt) ->
     pts_b_prev = pts_b_prev[:n]
     pts_b_curr = pts_b_curr[:n]
 
-    # Round-trip: pixels -> normalized -> body. Should match prev/curr.
+    # Полный круг: pixels -> normalized -> body. Должно совпасть с prev/curr.
     n_prev = fisheye_undistort_points(px_prev, K, D)
     n_curr = fisheye_undistort_points(px_curr, K, D)
     rec_prev_b, mask_p = ray_cast_ground(n_prev, R_c2b, agl)
     rec_curr_b, mask_c = ray_cast_ground(n_curr, R_c2b, agl)
 
-    # Roundtrip error per-point (in metres, body XY).
+    # Ошибка round-trip по точкам, в метрах в body XY.
     err_prev = np.linalg.norm(rec_prev_b[:, :2] - pts_b_prev[mask_p, :2], axis=1)
     err_curr = np.linalg.norm(rec_curr_b[:, :2] - pts_b_curr[mask_c, :2], axis=1)
 
-    # Rigid fit on the fully-paired subset.
+    # Rigid fit на полностью спаренном подмножестве.
     both = mask_p & mask_c
     n_pair = int(both.sum())
     src = pts_b_prev[both, :2]
     dst = pts_b_curr[both, :2]
     theta, t, rms = fit_rigid_transform_2d(src, dst)
-    # Aircraft motion = -theta yaw, -t translation in body XY.
+    # Движение самолёта = -theta по yaw и -t по сдвигу в body XY.
     rec_v = -t / dt
     rec_yaw_rate = -theta / dt
 
@@ -147,40 +147,41 @@ def stage1_geometry(K, D, image_size, pitch_deg, agl, vx_truth, vy_truth, dt) ->
 
 
 # ---------------------------------------------------------------------------
-# Stage 2 — synthetic LK pair
+# Этап 2 — синтетическая LK-пара
 # ---------------------------------------------------------------------------
 
 def stage2_synthetic_lk(K, D, image_size, pitch_deg, agl, vx_truth, vy_truth, dt) -> dict:
-    """Render two synthetic frames under known body motion and run full VO.
+    """Срендерить два синтетических кадра при известном движении и запустить полный VO.
 
-    Texture: random uniform noise, smoothed, so cv2.goodFeaturesToTrack
-    has plenty of corners to lock onto. We sample the SAME texture
-    field at the projected positions of each ground point, so the pair
-    is geometrically self-consistent.
+    Текстура: равномерный случайный шум со сглаживанием, чтобы
+    cv2.goodFeaturesToTrack находил достаточно углов. В обеих картинках
+    семплируется ОДНО И ТО ЖЕ поле текстуры в проекциях наземных точек,
+    поэтому пара геометрически самосогласована.
     """
     R_c2b = camera_to_body_rotation(pitch_deg)
     w, h = image_size
 
-    # Build a random ground-texture image: 1000x1000 m square in body XY,
-    # at z = AGL. We then project it into the camera at both prev and
-    # curr aircraft poses by computing per-pixel ground intersections.
-    # That's heavy but exact. For verification we don't need real-time.
+    # Строим случайную наземную текстуру: квадрат 1000x1000 м в body XY при
+    # z = AGL. Затем проецируем её в камеру для prev и curr поз самолёта,
+    # считая пересечение с землёй для каждого пикселя. Это тяжело, зато точно;
+    # real-time для проверки не нужен.
     rng = np.random.default_rng(seed=42)
-    tex_size = 800   # m, square side, centred at (forward=300, lateral=0)
-    tex_res = 1.0    # m per texture pixel
+    tex_size = 800   # м, сторона квадрата с центром (forward=300, lateral=0)
+    tex_res = 1.0    # м на пиксель текстуры
     tex_n = int(tex_size / tex_res)
     texture = rng.integers(0, 256, size=(tex_n, tex_n), dtype=np.uint8)
     texture = cv2.GaussianBlur(texture, (5, 5), 0)
-    tex_origin_x = 300 - tex_size / 2  # forward-min in body
-    tex_origin_y = -tex_size / 2       # lateral-min
+    tex_origin_x = 300 - tex_size / 2  # минимальный forward в body
+    tex_origin_y = -tex_size / 2       # минимальный lateral
 
     def sample_ground(pos_aircraft_body):
-        """Render the camera image when the aircraft is at pos_aircraft_body.
+        """Срендерить изображение камеры при положении самолёта pos_aircraft_body.
 
-        Each output pixel: undistort -> body ray (with aircraft origin
-        at pos_aircraft_body) -> intersect z=AGL plane -> sample texture.
+        Для каждого выходного пикселя: undistort -> луч в body при начале
+        координат самолёта pos_aircraft_body -> пересечение с плоскостью z=AGL
+        -> семпл текстуры.
         """
-        # Build a uv grid of pixel centres.
+        # Строим uv-сетку центров пикселей.
         u = np.arange(w) + 0.5
         v = np.arange(h) + 0.5
         U, V = np.meshgrid(u, v)
@@ -190,10 +191,9 @@ def stage2_synthetic_lk(K, D, image_size, pitch_deg, agl, vx_truth, vy_truth, dt
         rays_b = (R_c2b @ rays_c.T).T  # (N, 3)
         valid = rays_b[:, 2] > 1e-6
         t_param = (agl - 0.0) / np.where(valid, rays_b[:, 2], 1)
-        # Aircraft is at body origin in its own frame; the ground-point
-        # in WORLD frame coords (with aircraft as origin shifted by
-        # pos_aircraft_body) — but for this test we operate purely in
-        # body frame, so the aircraft offset just translates the texture.
+        # В своей СК самолёт находится в начале координат. Наземная точка в
+        # мировой СК сдвинута на pos_aircraft_body, но в этом тесте всё ведём
+        # в body frame, поэтому сдвиг самолёта просто переносит текстуру.
         ground_xy = rays_b[:, :2] * t_param[:, None] + pos_aircraft_body[None, :2]
         tx = ((ground_xy[:, 0] - tex_origin_x) / tex_res).astype(np.int32)
         ty = ((ground_xy[:, 1] - tex_origin_y) / tex_res).astype(np.int32)
@@ -204,12 +204,12 @@ def stage2_synthetic_lk(K, D, image_size, pitch_deg, agl, vx_truth, vy_truth, dt
         return img
 
     pos_prev = np.array([0.0, 0.0])
-    pos_curr = np.array([vx_truth * dt, vy_truth * dt])  # aircraft moved by v*dt
+    pos_curr = np.array([vx_truth * dt, vy_truth * dt])  # самолёт сдвинулся на v*dt
 
     img_prev = sample_ground(pos_prev)
     img_curr = sample_ground(pos_curr)
 
-    # Run two VO steps: bootstrap then a real measurement.
+    # Два шага VO: bootstrap, затем настоящее измерение.
     vo = OpticalFlowVO(K, D, image_size, pitch_deg=pitch_deg)
     vo.step(cv2.cvtColor(img_prev, cv2.COLOR_GRAY2BGR), dt=dt, agl_m=agl)
     step = vo.step(cv2.cvtColor(img_curr, cv2.COLOR_GRAY2BGR), dt=dt, agl_m=agl)
@@ -240,7 +240,7 @@ def stage2_synthetic_lk(K, D, image_size, pitch_deg, agl, vx_truth, vy_truth, dt
 
 
 # ---------------------------------------------------------------------------
-# Stage 3 — real cruise sanity
+# Этап 3 — sanity-check на реальном крейсере
 # ---------------------------------------------------------------------------
 
 def stage3_real_cruise(K, D, image_size, pitch_deg, agl_m, video_path, t0, t1) -> dict:
@@ -267,7 +267,7 @@ def stage3_real_cruise(K, D, image_size, pitch_deg, agl_m, video_path, t0, t1) -
         frame = proc.extract_frame(fi)
         if frame is None:
             continue
-        mask = tracker.mask_for_frame(fi, frame.shape[:2]) if tracker else None
+        mask = tracker.mask_for_frame(fi, frame.shape[:2], frame=frame) if tracker else None
         dt = 1.0 / fps if prev_idx is None else (fi - prev_idx) / fps
         prev_idx = fi
         step = vo.step(frame, dt=dt, agl_m=agl_m, aircraft_mask=mask)
@@ -322,7 +322,7 @@ def main() -> None:
     print(f"[verify] truth  : v=({args.vx:.1f}, {args.vy:.1f}) m/s  dt={args.dt:.4f} s")
     print()
 
-    # --- Stage 1 ---
+    # --- Этап 1 ---
     s1 = stage1_geometry(K, D, image_size, args.pitch_deg, args.agl_m,
                          args.vx, args.vy, args.dt)
     print("[stage1] geometry round-trip + analytic rigid fit")
@@ -341,7 +341,7 @@ def main() -> None:
     print(f"  stage1 -> {'OK' if s1_ok else 'FAIL'}")
     print()
 
-    # --- Stage 2 ---
+    # --- Этап 2 ---
     s2 = stage2_synthetic_lk(K, D, image_size, args.pitch_deg, args.agl_m,
                              args.vx, args.vy, args.dt)
     print("[stage2] synthetic LK pair through full VO step")
@@ -360,7 +360,7 @@ def main() -> None:
     print(f"  stage2 -> {'OK' if s2_ok else 'FAIL'}")
     print()
 
-    # --- Stage 3 ---
+    # --- Этап 3 ---
     if args.video.exists():
         s3 = stage3_real_cruise(K, D, image_size, args.pitch_deg, args.agl_m,
                                 args.video, args.cruise_start, args.cruise_end)

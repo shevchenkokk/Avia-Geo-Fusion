@@ -1,26 +1,23 @@
-"""Stage 2.1 verification: prove DemLookup answers correct elevations
-along a flight track, with the bilinear-interpolated curve smooth
-across known terrain features.
+"""Проверка этапа 2.1: убедиться, что DemLookup возвращает корректные высоты
+вдоль траектории, а билинейно интерполированная кривая остаётся гладкой на
+известных элементах рельефа.
 
-Criterion (PROJECT_PLAN.md §2.1): "on a test track passing through
-known elevation changes, AGL changes expectedly and without glitches".
+Критерий из PROJECT_PLAN.md §2.1: «на тестовой траектории через известные
+перепады высот AGL меняется ожидаемо и без скачков».
 
-Strategy:
-  1. Build a synthetic DEM with an analytic terrain shape (a hill in
-     the bbox centre + linear slope). The shape is exact, so we can
-     compare ``DemLookup.elevation(lat, lon)`` to the closed-form
-     ``expected_elevation`` at any point.
-  2. Pointwise correctness: 100 random samples within the bbox; the
-     bilinear-interpolated answer must match the analytic field to
-     within ~1 m (the discretisation error of a 90 m grid sampling a
-     smooth Gaussian).
-  3. Trajectory smoothness: walk along a diagonal flight path that
-     crosses the hill, plot ground elevation and AGL. A glitch (step
-     discontinuity, NaN, sharp spike) would be visible — and we also
-     assert numerically that |dAGL/ds| stays bounded.
-  4. Out-of-bbox queries return None (caller-aware contract).
-  5. Edge cases: query exactly on the bbox boundary, on a pixel
-     centre, at the synthetic hill peak.
+Стратегия:
+  1. Собрать синтетический DEM с аналитическим рельефом: холм в центре bbox
+     плюс линейный уклон. Форма точная, поэтому ``DemLookup.elevation(lat, lon)``
+     можно сравнивать с ``expected_elevation`` в любой точке.
+  2. Поточечная корректность: 100 случайных точек внутри bbox; билинейно
+     интерполированный ответ должен совпадать с аналитическим полем в пределах
+     ~1 м — это ошибка дискретизации 90-метровой сетки на гладком гауссиане.
+  3. Гладкость траектории: пройти диагональным маршрутом через холм и построить
+     ground elevation и AGL. Сбой вроде ступеньки, NaN или резкого выброса будет
+     виден; дополнительно численно проверяется ограниченность |dAGL/ds|.
+  4. Запросы вне bbox возвращают None, чтобы вызывающий код мог это обработать.
+  5. Краевые случаи: запрос прямо на границе bbox, в центре пикселя и на вершине
+     синтетического холма.
 """
 
 from __future__ import annotations
@@ -36,8 +33,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.dem_lookup import DemLookup
-# Reuse the analytic terrain definition so verification stays in lock-step
-# with the generator — if anyone tweaks the synthetic shape, both ends move.
+# Переиспользуем аналитическое описание рельефа, чтобы проверка оставалась
+# синхронной с генератором: если форма меняется, двигаются обе стороны.
 from scripts.make_test_dem import (  # noqa: E402
     expected_elevation,
     HILL_LAT,
@@ -49,11 +46,11 @@ from scripts.make_test_dem import (  # noqa: E402
 
 def _check_pointwise(dem: DemLookup, lat0: float, lon0: float,
                      n: int = 100, tol_m: float = 1.5) -> tuple[int, float, float]:
-    """Random points inside the bbox; assert lookup ≈ analytic."""
+    """Случайные точки внутри bbox; проверяем lookup ≈ analytic."""
     west, south, east, north = dem.bounds
     rng = np.random.default_rng(seed=0)
-    # Pull samples 1% inside the bbox so we never query at the exact
-    # edge — that's tested separately.
+    # Берём точки на 1% внутрь bbox, чтобы не попасть ровно на край:
+    # он проверяется отдельно.
     lats = rng.uniform(south + 0.01 * (north - south), north - 0.01 * (north - south), n)
     lons = rng.uniform(west + 0.01 * (east - west), east - 0.01 * (east - west), n)
 
@@ -70,15 +67,15 @@ def _check_pointwise(dem: DemLookup, lat0: float, lon0: float,
 
 def _check_smoothness(dem: DemLookup, lat0: float, lon0: float,
                       n: int = 2000) -> tuple[float, float, np.ndarray, np.ndarray]:
-    """Diagonal flight track across the bbox, crossing the hill.
+    """Диагональная траектория по bbox с пересечением холма.
 
-    Returns (max |dAGL/ds|, mean |dAGL/ds|, distance_m, agl_m) for
-    plotting. A glitchy lookup would produce isolated step edges where
-    |dAGL/ds| spikes by orders of magnitude.
+    Возвращает (max |dAGL/ds|, mean |dAGL/ds|, distance_m, agl_m) для графика.
+    Нестабильный lookup дал бы отдельные ступеньки, где |dAGL/ds| скачет на
+    порядки.
     """
     west, south, east, north = dem.bounds
-    # Start a bit inside the bbox to avoid the boundary; head NE so
-    # the track passes near (HILL_LAT, HILL_LON).
+    # Стартуем немного внутри bbox, чтобы не задеть границу; идём на северо-восток,
+    # чтобы траектория прошла рядом с (HILL_LAT, HILL_LON).
     lat_a = south + 0.05 * (north - south)
     lon_a = west + 0.05 * (east - west)
     lat_b = north - 0.05 * (north - south)
@@ -97,7 +94,7 @@ def _check_smoothness(dem: DemLookup, lat0: float, lon0: float,
             elev[i] = e
             agl[i] = altitude_msl - e
 
-    # Approximate distance along the track in metres.
+    # Приближённая дистанция вдоль траектории в метрах.
     cos_lat = np.cos(np.deg2rad(0.5 * (lat_a + lat_b)))
     dist = np.sqrt(((lats - lat_a) * 111111.0) ** 2
                    + ((lons - lon_a) * 111111.0 * cos_lat) ** 2)

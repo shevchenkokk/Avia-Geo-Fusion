@@ -13,7 +13,7 @@ def match_and_save(frame_drone, map_cv2, method, out_path):
     print(f"\n--- Запуск сопоставления фичей ({method.upper()}) ---")
     matcher = FeatureMatcher(method=method)
     
-    # Run the internal methods manually to get BOTH raw and inlier matches
+    # Вручную вызываем внутренние шаги, чтобы получить и сырые, и inlier-совпадения.
     gray_drone = matcher._preprocess_image(frame_drone)
     gray_map = matcher._preprocess_image(map_cv2)
     kp1, des1 = matcher.detector.detectAndCompute(gray_drone, None)
@@ -42,23 +42,23 @@ def match_and_save(frame_drone, map_cv2, method, out_path):
                 if is_inlier:
                     inlier_matches.append(good_matches[i])
                     
-    # Draw CHAOS (raw good matches before RANSAC filtering)
+    # Рисуем хаос: сырые хорошие совпадения до фильтрации RANSAC.
     debug_img_raw = cv2.drawMatches(
         frame_drone, kp1, 
         map_cv2, kp2, 
         good_matches, None, 
         flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS,
-        matchColor=(0, 0, 255) # Red lines for chaos
+        matchColor=(0, 0, 255) # красные линии для сырых совпадений
     )
     cv2.imwrite(out_path.replace('.jpg', '_raw.jpg'), debug_img_raw)
     
-    # Draw filtered
+    # Рисуем отфильтрованные совпадения.
     debug_img_filtered = cv2.drawMatches(
         frame_drone, kp1, 
         map_cv2, kp2, 
         inlier_matches, None, 
         flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS,
-        matchColor=(0, 255, 0) # Green lines for filtered
+        matchColor=(0, 255, 0) # зелёные линии для отфильтрованных совпадений
     )
     cv2.imwrite(out_path, debug_img_filtered)
     print(f"Результат сопоставления сохранен в: {out_path} и _raw.jpg")

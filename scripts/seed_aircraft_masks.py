@@ -1,21 +1,20 @@
-"""Stage 0b: seed aircraft body masks on representative frames.
+"""Этап 0b: начальные маски корпуса самолёта на репрезентативных кадрах.
 
-Runs SAM 3 with text prompts ("aircraft fuselage", "landing gear", "wing strut")
-on a stratified sample of frames from the source flight video.  For each
-anchor frame we save:
+Запускает SAM 3 с текстовыми prompt'ами ("aircraft fuselage", "landing gear",
+"wing strut") на стратифицированной выборке кадров из исходного полётного
+видео. Для каждого якорного кадра сохраняются:
 
-  * the undistorted RGB image (using the fisheye profile resolved in Stage 0a),
-  * a binary uint8 mask (255 = aircraft, 0 = background) in the undistorted
-    frame,
-  * an overlay image with the mask tinted, for manual QA,
-  * a per-frame JSON sidecar with boxes/scores/metadata.
+  * undistorted RGB-изображение с fisheye-профилем, выбранным на этапе 0a;
+  * бинарная uint8-маска в выпрямленном кадре: 255 = aircraft, 0 = background;
+  * overlay-изображение с подсвеченной маской для ручного QA;
+  * JSON sidecar на кадр с boxes/scores/metadata.
 
-A top-level ``index.json`` lists all anchors and flags those that need manual
-review (zero detections, or detections rejected by the left-strip prior).
+Верхнеуровневый ``index.json`` перечисляет все якоря и отмечает те, которым
+нужна ручная проверка: ноль детекций или детекции, отброшенные left-strip prior.
 
-This satisfies the Stage 0b deliverable: ``data/masks/anchors/`` populated
-with seed masks + overlays ready for a quick hand verification pass before
-Stage 0 smoke-testing.
+Так закрывается deliverable этапа 0b: ``data/masks/anchors/`` заполнен
+начальными масками и overlay для быстрой ручной проверки перед smoke-тестом
+этапа 0.
 """
 
 from __future__ import annotations
@@ -74,8 +73,10 @@ def _pick_frame_indices(
     warmup_seconds: float = 2.0,
     cooldown_seconds: float = 2.0,
 ) -> list[int]:
-    """Stratified uniform sampling with small jitter, avoiding the very first
-    and very last couple of seconds (takeoff/landing dynamics are noisy)."""
+    """Стратифицированная равномерная выборка с небольшим jitter.
+
+    Первые и последние пару секунд пропускаются: динамика взлёта/посадки шумная.
+    """
     if total_frames <= 0:
         raise ValueError("video has zero frames")
 

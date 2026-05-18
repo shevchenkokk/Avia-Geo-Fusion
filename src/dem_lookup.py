@@ -1,4 +1,4 @@
-"""Этап 2.1: запрос высоты рельефа из DEM с билинейной интерполяцией.
+"""Запрос высоты рельефа из DEM с билинейной интерполяцией.
 
 DEM (Digital Elevation Model) выдаёт высоту рельефа над уровнем моря (MSL)
 по (lat, lon). Разность altitude_MSL − terrain_MSL = AGL — величина, нужная
@@ -109,9 +109,19 @@ class DemLookup:
             bot = v10 * (1.0 - dc) + v11 * dc
             return float(top * (1.0 - dr) + bot * dr)
 
-        # Часть углов — nodata: усредняем по валидным.
-        vals = [v for v, m in [(v00, m00), (v01, m01), (v10, m10), (v11, m11)] if not m]
-        return float(np.mean(vals))
+        # Часть углов — nodata: взвешенная интерполяция только по валидным углам,
+        # с нормировкой суммы весов. Простое np.mean потеряло бы dr/dc,
+        # давая до ~1-3 м ошибки на границе nodata.
+        weights = [
+            ((1.0 - dr) * (1.0 - dc), v00, m00),
+            ((1.0 - dr) * dc,         v01, m01),
+            (dr * (1.0 - dc),         v10, m10),
+            (dr * dc,                 v11, m11),
+        ]
+        wsum = sum(w for w, _, m in weights if not m)
+        if wsum <= 0:
+            return None
+        return float(sum(w * v for w, v, m in weights if not m) / wsum)
 
     def height_agl(
         self, lat: float, lon: float, altitude_msl: float

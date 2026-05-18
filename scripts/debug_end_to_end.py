@@ -104,14 +104,14 @@ def main():
         print(f"  {i}. score={t['score']:.3f}  tile={t['tile_id']}  "
               f"latlon=({t['lat']:.4f}, {t['lon']:.4f})")
 
-    # Also try retrieval on the BEV-warped frame to see if that's better.
+    # Также пробуем retrieval на BEV-warped кадре: иногда это даёт лучший топ.
     top_bev = retr.query_image(bev_img, top_k=5)
     print("\n[debug] retriever top-5 (BEV-warped frame):")
     for i, t in enumerate(top_bev):
         print(f"  {i}. score={t['score']:.3f}  tile={t['tile_id']}  "
               f"latlon=({t['lat']:.4f}, {t['lon']:.4f})")
 
-    # Pull the retriever's top-5 z=14 tiles for visual inspection.
+    # Скачиваем top-5 тайлов z=14 от retriever для визуального просмотра.
     loader = MapDownloader(zoom=14)
     panels = []
     for i, t in enumerate(top):
@@ -125,15 +125,15 @@ def main():
         contact = np.hstack([_resize_to_height(p, 240) for p in panels])
         cv2.imwrite(str(args.output / "04_retriever_top5.png"), contact)
 
-    # MapManager window centred on retriever's top-1.
+    # Окно MapManager с центром в top-1 от retriever.
     mm = MapManager(zoom=args.zoom, window_radius=args.window_radius, closer_threshold=1)
     map_cv2, bbox = mm.initialize(top[0]["lat"], top[0]["lon"])
     print(f"\n[debug] MapManager z={args.zoom} window: shape={map_cv2.shape}  bbox={bbox}")
-    # Downsample for the contact sheet so it's not gigantic.
+    # Уменьшаем для contact sheet, чтобы картинка не была гигантской.
     map_small = _resize_to_height(map_cv2, 600)
     cv2.imwrite(str(args.output / "05_mm_window.png"), map_small)
 
-    # Side-by-side: BEV vs MapManager window — what the matcher actually sees.
+    # Рядом: BEV и окно MapManager — то, что реально видит матчер.
     bev_lbl = _label(bev_img, f"BEV (drone, pitch={args.pitch_deg}°)")
     mm_lbl = _label(map_small, f"MapManager z={args.zoom} window  (top1: {top[0]['tile_id']})")
     sheet = np.hstack([_resize_to_height(bev_lbl, 600), _resize_to_height(mm_lbl, 600)])

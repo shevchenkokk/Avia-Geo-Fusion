@@ -1,32 +1,31 @@
-"""End-to-end smoke test: prove the full perception stack acquires
-locks on real GP010269.MP4 cruise frames once the retriever solves
-bootstrap.
+"""Сквозной smoke-тест: проверить, что полный стек восприятия получает
+фиксации на реальных крейсерских кадрах GP010269.MP4, когда retriever решает
+задачу начального поиска.
 
-Pipeline per frame:
+Пайплайн на кадр:
 
-    raw frame
-       ├─> retriever (DINOv2-B) -> top-1 z=14 tile -> approx (lat, lon)
+    сырой кадр
+       ├─> retriever (DINOv2-B) -> top-1 тайл z=14 -> грубо (lat, lon)
        │
-       └─> undistort -> aircraft mask -> BEV(pitch=-30) -> matcher
+       └─> выпрямление -> маска самолёта -> BEV(pitch=-30) -> matcher
                                                               vs
-                                                z=17 MapManager window
-                                                centred on retriever fix
+                                                окно MapManager z=17
+                                                вокруг фиксации retriever
                                                               │
                                                               v
                                                   compute_map_measurement
 
-We do NOT chain successive frames yet (no temporal trust, no EKF) —
-that's what comes after this proves matching is feasible. We're
-asking the simplest possible question: **does the matcher accept any
-frame at all once the right tile is in the window?** If yes, every
-following milestone (real §3.2 calibration, EKF on real video,
-trajectory drift measurement) is unblocked. If no, we need §3.4
-(XFeat/MatchAnything) before anything else.
+Последовательные кадры здесь ещё НЕ связываются: нет временного доверия и нет
+EKF. Это следующий шаг после доказательства, что сопоставление вообще возможно.
+Вопрос максимально простой: **принимает ли матчер хоть один кадр, когда нужный
+тайл уже попал в окно?** Если да, разблокированы следующие вехи: реальная
+калибровка §3.2, EKF на реальном видео, измерение дрейфа траектории. Если нет,
+сначала нужен §3.4 (XFeat/MatchAnything).
 
-Metrics logged per sample:
-  * retriever top-1 cosine, lat/lon, tile_id
+Метрики на сэмпл:
+  * cosine-score top-1 у retriever, lat/lon и tile_id
   * matcher: raw_matches, num_inliers, inlier_ratio, reproj_px, accepted
-  * residual between retriever fix and matcher fix (km)
+  * остаток между фиксацией retriever и фиксацией matcher, км
 """
 
 from __future__ import annotations
@@ -52,12 +51,16 @@ try:
 except Exception:
     pass
 
-from src.aircraft_mask import AircraftMaskTracker
+from src.aircraft_mask import (
+    AircraftMaskTracker,
+    load_aircraft_mask_tracker_for_video,
+)
 from src.bev_rectifier import BevRectifier
 from src.geo_segmentor import GeoSegmentor
 from src.map_manager import MapManager
 from src.map_measurement import compute_map_measurement
 from src.neural_matching import NeuralMatcher
+from src.online_occlusion import OnlineAircraftOcclusionMasker, SamAircraftSegmenter
 from src.retriever import Retriever
 from src.snow_mask import combine_with_aircraft_mask, detect_snow_mask
 from src.undistort import Undistorter
@@ -78,6 +81,36 @@ def main() -> None:
     p.add_argument("--video", type=Path, default=Path("data/videos/GP010269.MP4"))
     p.add_argument("--camera-config", type=Path, default=Path("configs/camera_gopro_hx.yaml"))
     p.add_argument("--anchors-dir", type=Path, default=Path("data/masks/anchors"))
+    p.add_argument(
+        "--aircraft-mask-mode",
+        choices=("off", "anchors", "online-sam", "hybrid"),
+        default="anchors",
+        help="off: без маски самолёта; anchors: только совместимый профиль "
+        "камеры/носителя; online-sam: периодический SAM-refresh + optical flow; "
+        "hybrid: SAM-refresh и совместимые anchors как резерв",
+    )
+    p.add_argument(
+        "--allow-aircraft-mask-video-mismatch",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="только для отладки: разрешить anchors, чей index.json указывает на другое видео",
+    )
+    p.add_argument("--sam-refresh-s", type=float, default=2.0)
+    p.add_argument("--sam-model-id", type=str, default="facebook/sam3")
+    p.add_argument(
+        "--sam-prompts",
+        type=str,
+        default="aircraft|airplane wing|aircraft fuselage|landing gear|wing strut|cockpit frame",
+    )
+    p.add_argument("--sam-device", type=str, default="auto", choices=("auto", "cpu", "cuda", "mps"))
+    p.add_argument("--sam-score-threshold", type=float, default=0.20)
+    p.add_argument("--sam-mask-threshold", type=float, default=0.50)
+    p.add_argument("--sam-dilation-px", type=int, default=18)
+    p.add_argument("--sam-close-radius-px", type=int, default=5)
+    p.add_argument("--sam-min-coverage", type=float, default=0.002)
+    p.add_argument("--sam-max-coverage", type=float, default=0.45)
+    p.add_argument("--sam-left-only-frac", type=float, default=1.0)
+    p.add_argument("--sam-max-box-right-frac", type=float, default=1.0)
     p.add_argument("--retriever-db", type=Path, default=Path("data/retrieval/db_z14"))
     p.add_argument("--output", type=Path, default=Path("results/end_to_end"))
     p.add_argument("--cruise-start-s", type=float, default=45.0)
@@ -85,30 +118,32 @@ def main() -> None:
     p.add_argument("--sample-period-s", type=float, default=2.0)
     p.add_argument("--zoom", type=int, default=17)
     p.add_argument("--window-radius", type=int, default=5,
-                   help="±radius z=17 tiles around retriever fix (covers ~1.3 km)")
+                   help="радиус окна z=17 вокруг фиксации retriever, в тайлах")
     p.add_argument("--pitch-deg", type=float, default=-30.0)
     p.add_argument("--agl-m", type=float, default=620.0)
     p.add_argument("--ground-span-m", type=float, default=400.0)
     p.add_argument("--bev-out-size", type=int, default=800)
     p.add_argument("--backend", type=str, default="auto")
     p.add_argument("--snow-mask", action=argparse.BooleanOptionalAction, default=False,
-                   help="Stage 4-lite: mask out snow regions on BEV before matcher")
+                   help="этап 4-lite: маскировать снег на BEV перед matcher")
     p.add_argument("--snow-v-threshold", type=float, default=0.80)
     p.add_argument("--snow-s-threshold", type=float, default=0.15)
     p.add_argument("--retriever-top-k", type=int, default=1,
-                   help=">1: try top-K retriever tiles per frame, accept the "
-                        "best-scoring matcher result (handles retriever noise)")
+                   help="если >1, пробуем top-K тайлов retriever на кадр и "
+                        "берём лучший результат matcher")
     p.add_argument("--apply-clahe", action=argparse.BooleanOptionalAction, default=False,
-                   help="Stage 3.6: CLAHE on grayscale before matcher. Empirical "
-                        "result on cross-seasonal GP010269: -3 accepted frames "
-                        "(5/23 -> 2/23), so OFF by default. Toggle for ablation.")
+                   help="этап 3.6: CLAHE на grayscale перед matcher. На "
+                        "межсезонном GP010269 ухудшило результат, поэтому "
+                        "по умолчанию выключено.")
     p.add_argument("--semantic-mask", action=argparse.BooleanOptionalAction, default=False,
-                   help="Stage 4: filter matches by semantic class — keep only "
-                        "keypoints on buildings+roads (seasonally stable)")
+                   help="этап 4: фильтровать совпадения по семантическому классу")
+    p.add_argument("--semantic-structural-match", action=argparse.BooleanOptionalAction, default=False,
+                   help="этап 4b: независимый mask-to-mask NCC канал; "
+                        "SegFormer обрабатывает drone и sat, NCC идёт по классам.")
     p.add_argument("--seg-config", type=Path,
-                   default=Path("results/segformer_overture_b0_ade1400_nocw_best/segformer_overture_quick_cfg.py"))
+                   default=Path("results/segformer_overture_b0_phase_c_osm_manualcw/segformer_overture_quick_cfg.py"))
     p.add_argument("--seg-checkpoint", type=Path,
-                   default=Path("results/segformer_overture_b0_ade1400_nocw_best/best_mIoU_iter_932.pth"))
+                   default=Path("results/segformer_overture_b0_phase_c_osm_manualcw/best_mIoU_iter_1165.pth"))
     args = p.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
 
@@ -121,18 +156,49 @@ def main() -> None:
           f"sample={args.sample_period_s}s")
     print()
 
-    # Components.
+    # Компоненты.
     retr = Retriever()
     retr.load_database(args.retriever_db)
     print(f"[run] retriever device : {retr.device}  N={len(retr.database)}")
     undistorter = Undistorter.from_yaml(args.camera_config)
     print(f"[run] K_rect[0,0]      : {undistorter.K_rect[0,0]:.2f}")
-    mask_tracker = (
-        AircraftMaskTracker.from_index(args.anchors_dir)
-        if (args.anchors_dir / "index.json").exists() else None
-    )
+    proc = VideoProcessor(str(args.video),
+                          default_geo=(55.086025, 38.149033, 750.0))
+    src_fps = proc.info.fps
+    platform_mask_tracker: AircraftMaskTracker | None = None
+    if args.aircraft_mask_mode in ("anchors", "hybrid"):
+        platform_mask_tracker = load_aircraft_mask_tracker_for_video(
+            args.anchors_dir,
+            args.video,
+            allow_video_mismatch=args.allow_aircraft_mask_video_mismatch,
+        )
+    if args.aircraft_mask_mode == "off":
+        mask_tracker = None
+    elif args.aircraft_mask_mode in ("online-sam", "hybrid"):
+        sam_prompts = [s.strip() for s in args.sam_prompts.split("|") if s.strip()]
+        sam_segmenter = SamAircraftSegmenter(
+            model_id=args.sam_model_id,
+            prompts=sam_prompts,
+            device=args.sam_device,
+            score_threshold=args.sam_score_threshold,
+            mask_threshold=args.sam_mask_threshold,
+            dilation_px=args.sam_dilation_px,
+            close_radius_px=args.sam_close_radius_px,
+            min_coverage=args.sam_min_coverage,
+            max_coverage=args.sam_max_coverage,
+            left_only_frac=args.sam_left_only_frac,
+            max_box_right_frac=args.sam_max_box_right_frac,
+        )
+        mask_tracker = OnlineAircraftOcclusionMasker(
+            sam_segmenter=sam_segmenter,
+            platform_tracker=platform_mask_tracker,
+            sam_refresh_frames=max(1, int(round(args.sam_refresh_s * src_fps))),
+        )
+    else:
+        mask_tracker = platform_mask_tracker
+    print(f"[run] aircraft mask    : {args.aircraft_mask_mode}")
     if mask_tracker:
-        print(f"[run] aircraft mask    : {mask_tracker.num_anchors()} anchors")
+        print(f"[run] mask anchors     : {mask_tracker.num_anchors()}")
     bev = BevRectifier.build(
         K_rect=undistorter.K_rect, image_size=undistorter.image_size,
         pitch_deg=args.pitch_deg, agl_m=args.agl_m,
@@ -142,48 +208,44 @@ def main() -> None:
     print(f"[run] BEV pitch        : {args.pitch_deg}°")
 
     matcher = NeuralMatcher(backend=args.backend, apply_clahe=args.apply_clahe)
-    proc = VideoProcessor(str(args.video),
-                          default_geo=(55.086025, 38.149033, 750.0))
 
-    # Stage 4 semantic mask: SegFormer-B0 fine-tuned on Overture-RU.
-    # Stable IDs hand-restricted to {3,4} (buildings, roads) — vegetation
-    # is in the schema's `stable` set but isn't seasonally stable for
-    # our winter-vs-summer gap; water can't host keypoints anyway.
+    # Семантическая маска этапа 4: SegFormer-B0, дообученный на Overture-RU.
+    # Стабильные ID вручную ограничены до {3,4} (здания, дороги): растительность есть
+    # в `stable` схемы, но неустойчива при разрыве зима-лето; вода всё равно
+    # почти не даёт ключевых точек.
     seg = None
-    if args.semantic_mask:
+    need_seg = args.semantic_mask or args.semantic_structural_match
+    if need_seg:
         import torch
         seg_device = "mps" if torch.backends.mps.is_available() else "cpu"
-        # SegFormer-B0 fine-tuned on Overture-RU is reliable on satellite
-        # imagery (its training domain). On winter BEV-warped drone frames
-        # it suffers severe domain shift (predicts ~97 % background), so
-        # we run the heuristic texture-based segmenter on the drone side
-        # and the ML one on the satellite side. The semantic mask filter
-        # then keeps only matches whose drone endpoint is in a textured
-        # ground region AND whose sat endpoint is on a stable class.
+        # SegFormer-B0, дообученный на Overture-RU, надёжен на спутниковых
+        # снимках: это его обучающий домен. На зимних BEV-warped кадрах с дрона
+        # он сильно страдает от domain shift и предсказывает ~97 % background,
+        # поэтому на стороне дрона используется эвристический текстурный
+        # сегментер, а на спутниковой стороне — ML. Фильтр семантической маски
+        # оставляет только совпадения, где точка дрона лежит в текстурной
+        # наземной области, А спутниковая точка — на стабильном классе.
         seg = GeoSegmentor(
             backend="mmseg",
             mmseg_config=str(args.seg_config),
             mmseg_checkpoint=str(args.seg_checkpoint),
             mmseg_device=seg_device,
-            # Include water (1) — over agricultural/forest tiles the
-            # model misclassifies dark forest as water, but those are
-            # still seasonally stable surfaces; including water keeps
-            # ~50 % of pixels eligible. Exclude bg (0) — that's the
-            # "no-class" output and we want to drop those matches.
+            # Включаем water (1): на сельхоз/лесных тайлах модель иногда
+            # путает тёмный лес с водой, но это всё равно сезонно стабильные
+            # поверхности. С water остаётся около 50 % допустимых пикселей.
+            # bg (0) исключаем: это класс "нет объекта", такие совпадения надо отбрасывать.
             stable_class_ids={1, 2, 3, 4},
             top_crop_ratio=0.0,
         )
         seg_drone = GeoSegmentor(backend="heuristic", top_crop_ratio=0.0)
         if seg.backend != "mmseg":
-            print(f"[run] WARNING: semantic mask requested but mmseg "
-                  f"failed to init; running WITHOUT class filter")
+            print(f"[run] ПРЕДУПРЕЖДЕНИЕ: запрошена semantic mask, но mmseg "
+                  f"не инициализировался; запускаемся без class filter")
             seg = None
         else:
             print(f"[run] semantic mask  : ML(sat) + heuristic(drone)  "
                   f"sat stable={1, 2, 3, 4}")
-    src_fps = proc.info.fps
-
-    # MapManager cache keyed by retriever tile_id (z=14).
+    # Кэш MapManager по retriever tile_id (z=14).
     mm_cache: dict[str, tuple] = {}
 
     def _ensure_window(tile_id: str, lat: float, lon: float):
@@ -212,14 +274,14 @@ def main() -> None:
         if frame is None:
             continue
 
-        # Retriever bootstrap (top-K with fusion if requested).
+        # Инициализация через retriever: top-K с объединением, если задано.
         tops = retr.query_image(frame, top_k=args.retriever_top_k)
 
-        # Frame pipeline (one-shot, shared across all retriever candidates):
-        # undistort -> mask -> BEV.
+        # Покадровый one-shot пайплайн, общий для всех кандидатов retriever:
+        # выпрямление кадра -> маска -> BEV.
         rect = undistorter.undistort_image(frame)
         if mask_tracker is not None:
-            mask_raw = mask_tracker.mask_for_frame(fi, frame.shape[:2])
+            mask_raw = mask_tracker.mask_for_frame(fi, frame.shape[:2], frame=frame)
             mask_rect = undistorter.undistort_image(mask_raw)
             mask_bev = bev.warp_mask(mask_rect)
         else:
@@ -233,18 +295,17 @@ def main() -> None:
             )
             mask_bev = combine_with_aircraft_mask(snow, mask_bev)
 
-        # Stage 4 final shape: ML segmentation only on satellite side.
-        # The drone BEV in winter fools the heuristic SkySegmenter (snow
-        # mistaken for sky → returns 0 % texture) and the ML segmenter
-        # (97 % background, severe domain shift). Sat-side filtering
-        # alone, combined with the existing aircraft+snow masks on the
-        # drone side, gives the same defense story without the drone-
-        # side false-zeros problem.
-        drone_cmap = None  # explicitly disabled
+        # Финальная форма этапа 4: ML-сегментация только на спутниковой стороне.
+        # Зимний drone BEV обманывает эвристический SkySegmenter: снег
+        # принимается за небо, текстура становится 0 %. ML-сегментер тоже
+        # страдает от domain shift и даёт 97 % background. Фильтрация только
+        # спутниковой стороны вместе с уже существующими масками самолёта и
+        # снега даёт ту же логику защиты без ложных нулей со стороны дрона.
+        drone_cmap = None  # явно выключено
 
-        # Try each top-K candidate; keep the result with the highest
-        # inlier count. If multiple tie, prefer the higher retriever
-        # score (top-1 first).
+        # Пробуем каждого top-K кандидата; оставляем результат с максимальным
+        # числом inlier-точек. При равенстве предпочтение выше score retriever
+        # (top-1 идёт первым).
         best_meas = None
         best_top = tops[0]
         best_match_ms = 0.0
@@ -256,13 +317,9 @@ def main() -> None:
             m_ms = (time.time() - mt0) * 1000.0
             mkpts0_arr = r["mkpts0"]; mkpts1_arr = r["mkpts1"]
 
-            # Stage 4 semantic filter (sat side only). Drop matches whose
-            # satellite endpoint lies on the "no-class" background (open
-            # field, parking, untextured terrain) — those are typically
-            # cross-seasonal RANSAC noise. Drone side is left unfiltered
-            # because the ML segmenter has severe domain shift on winter
-            # BEV, and the aircraft+snow masks already do their job.
-            if seg is not None and len(mkpts0_arr) > 0:
+            # Семантический фильтр этапа 4, только спутниковая сторона.
+            sat_cmap = None
+            if seg is not None and args.semantic_mask and len(mkpts0_arr) > 0:
                 sat_cmap = seg.stable_class_map(map_cv2)
                 s_xy = mkpts1_arr.astype(np.int32)
                 s_xy[:, 0] = np.clip(s_xy[:, 0], 0, sat_cmap.shape[1] - 1)
@@ -286,15 +343,49 @@ def main() -> None:
         ret_lat = best_top["lat"]; ret_lon = best_top["lon"]
         ret_score = best_top["score"]; tile_id = best_top["tile_id"]
         match_ms = best_match_ms; raw_matches = best_raw
-        # bbox/map_cv2 of the *winning* candidate (for logging only).
+        # bbox/map_cv2 победившего кандидата нужны только для логирования.
         map_cv2, bbox = _ensure_window(tile_id, ret_lat, ret_lon)
-        mkpts0 = np.empty((0, 2)); mkpts1 = np.empty((0, 2))  # not needed downstream
+        mkpts0 = np.empty((0, 2)); mkpts1 = np.empty((0, 2))  # дальше не используются
 
         residual_km = float("nan")
         if meas.accepted:
             accepted_count += 1
             residual_km = _haversine_km(ret_lat, ret_lon, meas.lat, meas.lon)
             last_inliers_log.append(meas.num_inliers)
+
+        # --- Structural-канал: mask-to-mask NCC с SegFormer на обеих сторонах ---
+        struct_accepted = False
+        struct_peak = float("nan")
+        struct_margin = float("nan")
+        struct_lat = float("nan")
+        struct_lon = float("nan")
+        if args.semantic_structural_match and seg is not None:
+            from src.semantic_mask_matcher import mask_to_mask_match
+            # SegFormer на лучшем кандидате (map_cv2 уже доступен — это победитель).
+            drone_class_map = seg.stable_class_map(frame_bev)
+            if sat_cmap is None:
+                sat_cmap = seg.stable_class_map(map_cv2)
+            # Оценка m/px: frame_bev = ground_span_m / bev_out_size.
+            drone_mppx = args.ground_span_m / frame_bev.shape[1]
+            # Спутниковое окно покрывает тайлы window_radius на заданном zoom.
+            # Упрощённо используем тот же m/px, что и у drone BEV.
+            sat_mppx = drone_mppx
+            sfix = mask_to_mask_match(
+                drone_class_map=drone_class_map,
+                sat_class_map=sat_cmap,
+                drone_mppx=drone_mppx,
+                sat_mppx=sat_mppx,
+                sat_centre_latlon=(ret_lat, ret_lon),
+            )
+            struct_peak = sfix.peak_score
+            struct_margin = sfix.peak_margin
+            if sfix.accepted:
+                struct_accepted = True
+                struct_lat = sfix.lat
+                struct_lon = sfix.lon
+
+        # Кадр считается принятым, если хотя бы один канал дал валидное измерение.
+        frame_any_accepted = meas.accepted or struct_accepted
         rows.append({
             "frame_idx": fi,
             "t_sec": fi / src_fps,
@@ -313,27 +404,39 @@ def main() -> None:
             "fix_lat": meas.lat,
             "fix_lon": meas.lon,
             "residual_ret_km": residual_km,
+            "struct_accepted": int(struct_accepted),
+            "struct_peak": struct_peak,
+            "struct_margin": struct_margin,
+            "struct_lat": struct_lat,
+            "struct_lon": struct_lon,
+            "any_accepted": int(frame_any_accepted),
         })
 
-        marker = "*" if meas.accepted else " "
+        marker = "*" if frame_any_accepted else " "
+        struct_str = (f" str_acc=Y peak={struct_peak:.2f}" if struct_accepted
+                      else f" str_acc=N peak={struct_peak:.2f}" if args.semantic_structural_match
+                      else "")
         print(f"  {marker} f={fi:>6}  t={fi/src_fps:5.1f}s  retr={ret_score:.3f} "
               f"({ret_lat:.4f},{ret_lon:.4f})  raw={raw_matches:<3} "
-              f"inl={meas.num_inliers:<3} ratio={meas.inlier_ratio:.2f} "
-              f"reproj={meas.reprojection_error_px:.2f}  acc={int(meas.accepted)} "
-              f"reject={meas.reject_reason or '-':<20s} match={match_ms:5.0f}ms")
+              f"inl={meas.num_inliers:<3} acc={int(meas.accepted)}{struct_str}")
 
     elapsed = time.time() - t_start
     print()
     print(f"[run] total runtime   : {elapsed:.1f}s")
     print(f"[run] mm windows used : {len(mm_cache)} (cached by retriever tile_id)")
     print(f"[run] frames tested   : {len(rows)}")
-    print(f"[run] frames accepted : {accepted_count}  ({100*accepted_count/max(1,len(rows)):.1f}%)")
+    n_struct_acc = sum(int(r.get("struct_accepted", 0)) for r in rows)
+    n_any_acc = sum(int(r.get("any_accepted", 0) or r.get("accepted", 0)) for r in rows)
+    print(f"[run] frames accepted (appearance) : {accepted_count}  ({100*accepted_count/max(1,len(rows)):.1f}%)")
+    if args.semantic_structural_match:
+        print(f"[run] frames accepted (structural) : {n_struct_acc}  ({100*n_struct_acc/max(1,len(rows)):.1f}%)")
+        print(f"[run] frames accepted (any channel): {n_any_acc}  ({100*n_any_acc/max(1,len(rows)):.1f}%)")
     if last_inliers_log:
         arr = np.array(last_inliers_log)
         print(f"[run] inliers (acc'd) : median {float(np.median(arr)):.0f}  "
               f"max {int(arr.max())}")
 
-    # Reject-reason histogram.
+    # Гистограмма причин отбраковки.
     rej_counts: dict[str, int] = {}
     for r in rows:
         if not r["accepted"]:
@@ -343,7 +446,7 @@ def main() -> None:
         for k, v in sorted(rej_counts.items(), key=lambda kv: -kv[1]):
             print(f"    {k:30s} {v}")
 
-    # CSV + summary.
+    # CSV и короткая сводка.
     csv_path = args.output / "smoke.csv"
     with csv_path.open("w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))

@@ -1,27 +1,27 @@
-"""Stage 2.5 verification: prove ``velocity_scale_bias`` converges
-on noisy data and reduces post-outage drift.
+"""Проверка этапа 2.5: доказать, что ``velocity_scale_bias`` сходится на шумных
+данных и уменьшает дрейф после участка без map-fix.
 
-The §2.5 criterion: "after ~5 minutes the velocity_scale_bias
-converges to a stable value within ±2 %, and VO drift on subsequent
-no-map sections decreases".
+Критерий §2.5: «примерно через 5 минут velocity_scale_bias сходится к
+стабильному значению в пределах ±2 %, а дрейф VO на последующих участках без
+карты уменьшается».
 
-We test both halves:
+Проверяются обе части:
 
-  Stage A — convergence. Truth body speed 70 m/s, but the VO module
-  *systematically under-reports* by a factor 1/1.5 (i.e. the true
-  scale_bias is 1.5). Filter starts at 1.0 ± 0.3. Run 5 minutes with
-  noisy OF + map fixes; check the final estimate is within 2 % of
-  truth (1.47 ≤ scale_bias ≤ 1.53).
+  Этап A — сходимость. Истинная скорость в СК тела 70 м/с, но модуль VO
+  *систематически занижает* её в 1/1.5 раза, то есть истинный scale_bias равен
+  1.5. Фильтр стартует с 1.0 ± 0.3. Запускаем 5 минут шумного OF + map-fix и
+  проверяем, что итоговая оценка отличается от истины не более чем на 2 %
+  (1.47 ≤ scale_bias ≤ 1.53).
 
-  Stage B — drift comparison. Run two parallel filters on the same
-  synthetic measurement stream:
-    - ``corrected``: lets scale_bias adapt (Stage 2.5 enabled).
-    - ``baseline``: scale_bias clamped to 1.0 forever.
-  After 5 min of fixes, drop map updates for 60 s on both. Compare
-  drift at end of outage. The corrected filter must have *smaller*
-  drift, since it learned the true scale.
+  Этап B — сравнение дрейфа. Запускаем два параллельных фильтра на одном и том
+  же синтетическом потоке измерений:
+    - ``corrected``: разрешает адаптацию scale_bias (этап 2.5 включён);
+    - ``baseline``: scale_bias навсегда зажат в 1.0.
+  После 5 минут фиксаций отключаем map-обновления на 60 с в обоих фильтрах.
+  Сравниваем дрейф в конце пропуска: corrected должен дрейфовать *меньше*,
+  потому что выучил правильный масштаб.
 
-Outputs:
+Выходы:
     results/stage2_5/scale_convergence.png — bias trajectory + 1σ band
     results/stage2_5/drift_compare.png      — corrected vs baseline
     results/stage2_5/summary.txt
@@ -45,10 +45,10 @@ from src.frame_bridge import FrameBridge
 
 
 def _make_filter(bridge, yaw_deg, init_speed):
-    """Realistic bootstrap: position seeded from a first map fix, but
-    velocity left uncertain (σ=30 m/s) so the filter is honestly open
-    to whatever the OF says — including a biased reading. Mirrors the
-    production bootstrap where we don't know cruise speed in advance.
+    """Реалистичный bootstrap: позиция задаётся первой map-fix, а скорость
+    остаётся неопределённой (σ=30 м/с), чтобы фильтр честно принимал то, что
+    говорит OF, включая смещённое измерение. Это повторяет рабочий bootstrap,
+    где крейсерская скорость заранее неизвестна.
     """
     f = StateFilter(bridge)
     f.initialize_from_wgs84(bridge.lat0, bridge.lon0, bridge.alt0_msl + 620.0,
@@ -63,7 +63,7 @@ def _make_filter(bridge, yaw_deg, init_speed):
 
 
 # ---------------------------------------------------------------------------
-# Stage A — convergence
+# Этап A — сходимость
 # ---------------------------------------------------------------------------
 
 def stage_a_convergence(
@@ -81,7 +81,7 @@ def stage_a_convergence(
     bridge = FrameBridge(55.086025, 38.149033, 130.0)
     f = _make_filter(bridge, yaw_deg=yaw_deg, init_speed=speed)
 
-    # The VO outputs body velocity scaled by 1/truth_scale.
+    # VO выдаёт скорость в СК тела, масштабированную на 1/truth_scale.
     vo_raw_forward = speed / truth_scale
 
     n_steps = int(round(duration_s / of_dt))
@@ -100,10 +100,10 @@ def stage_a_convergence(
     for k in range(1, n_steps + 1):
         f.predict(of_dt)
         t_acc += of_dt
-        # Truth aircraft position.
+        # Истинная позиция самолёта.
         x_truth = vx_e_t * t_acc
         y_truth = vy_n_t * t_acc
-        # OF measurement (raw, biased).
+        # OF-измерение: сырое и смещённое.
         v_raw = np.array([
             vo_raw_forward + rng.normal(0.0, sigma_v),
             rng.normal(0.0, sigma_v),
@@ -122,7 +122,7 @@ def stage_a_convergence(
         f.update_altitude(bridge.alt0_msl + 620.0, sigma_h_m=50.0)
         f.maybe_update_heading_prior(sigma_heading_rad=math.radians(20.0))
 
-        if k % int(round(1.0 / of_dt)) == 0:  # log every 1 s
+        if k % int(round(1.0 / of_dt)) == 0:  # лог раз в 1 с
             times.append(t_acc)
             bias_hist.append(f.scale_bias())
             sigma_hist.append(f.scale_bias_sigma())
@@ -153,7 +153,7 @@ def stage_a_convergence(
 
 
 # ---------------------------------------------------------------------------
-# Stage B — drift comparison after outage
+# Этап B — сравнение дрейфа после пропуска фиксаций
 # ---------------------------------------------------------------------------
 
 def stage_b_drift_compare(
@@ -170,10 +170,10 @@ def stage_b_drift_compare(
     rng = np.random.default_rng(seed=22)
     bridge = FrameBridge(55.086025, 38.149033, 130.0)
 
-    # Two parallel filters: corrected (scale adapts) vs baseline (clamped).
+    # Два параллельных фильтра: corrected с адаптацией масштаба и baseline с зажимом.
     f_corr = _make_filter(bridge, yaw_deg, speed)
     f_base = _make_filter(bridge, yaw_deg, speed)
-    # Pin the baseline's scale_bias variance to ~zero so it never adapts.
+    # Прижимаем дисперсию scale_bias в baseline почти к нулю, чтобы он не адаптировался.
     f_base.x[StateFilter.IDX_SCALE_BIAS] = 1.0
     f_base.P[StateFilter.IDX_SCALE_BIAS, StateFilter.IDX_SCALE_BIAS] = 1e-12
     f_base.q_scale = 0.0
@@ -191,7 +191,7 @@ def stage_b_drift_compare(
     drift_base_hist: list[float] = []
     times_outage: list[float] = []
 
-    # Same noise stream for both filters so the comparison is paired.
+    # Один и тот же поток шума для обоих фильтров, чтобы сравнение было парным.
     t_acc = 0.0
     for k in range(1, n_warm + n_outage + 1):
         f_corr.predict(of_dt)

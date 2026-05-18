@@ -1,22 +1,22 @@
-"""Stage 1.2 visual sanity check: confirm the aircraft mask actually
-suppresses keypoints on the fuselage in the matcher pipeline.
+"""Визуальная проверка этапа 1.2: убеждаемся, что маска самолёта действительно
+подавляет ключевые точки на фюзеляже внутри пайплайна матчинга.
 
-For each sampled frame the script:
-  1. extracts the frame from the video,
-  2. asks ``AircraftMaskTracker`` for the nearest-anchor mask,
-  3. runs ``NeuralMatcher.match(frame, map_tile, aircraft_mask=mask)``
-     against a placeholder map (we don't care about the satellite side
-     here — only the drone-side keypoints),
-  4. renders the drone frame with the mask outline drawn in red and
-     the kept keypoints (mkpts0) drawn as green dots, then
-  5. asserts that **no kept keypoint lies inside the mask**.
+Для каждого выбранного кадра скрипт:
+  1. достаёт кадр из видео;
+  2. просит ``AircraftMaskTracker`` вернуть маску ближайшего якоря;
+  3. запускает ``NeuralMatcher.match(frame, map_tile, aircraft_mask=mask)``
+     на технической карте-заглушке: здесь важны только ключевые точки со
+     стороны самолёта;
+  4. рисует кадр с красным контуром маски и зелёными сохранёнными точками
+     ``mkpts0``;
+  5. проверяет, что **ни одна сохранённая точка не лежит внутри маски**.
 
-A single composite PNG is written with one row per sample frame, plus
-a summary line printed: ``frame=... raw=... kept=... inside_mask=0``.
+На выход пишется один общий PNG с отдельной строкой на каждый кадр, а в
+консоль печатается сводка вида ``frame=... raw=... kept=... inside_mask=0``.
 
-The criterion (PROJECT_PLAN.md §1.2): "in the debug overlay inliers
-never land on the aircraft body". A green dot inside the red boundary
-on the output image is a violation.
+Критерий из PROJECT_PLAN.md §1.2: на отладочном оверлее inlier-точки не
+должны попадать на корпус самолёта. Зелёная точка внутри красной границы на
+итоговом изображении считается ошибкой.
 """
 
 from __future__ import annotations
@@ -32,7 +32,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.aircraft_mask import AircraftMaskTracker, filter_keypoints_by_mask
+from src.aircraft_mask import (
+    load_aircraft_mask_tracker_for_video,
+    filter_keypoints_by_mask,
+)
 from src.neural_matching import NeuralMatcher
 from src.video_processor import VideoProcessor
 
@@ -72,14 +75,19 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
     processor = VideoProcessor(str(args.video), default_geo=(55.086025, 38.149033, 750.0))
-    tracker = AircraftMaskTracker.from_index(args.anchors_dir)
+    tracker = load_aircraft_mask_tracker_for_video(args.anchors_dir, args.video)
+    if tracker is None:
+        raise SystemExit(
+            "aircraft-mask anchors do not match --video; generate anchors for "
+            "this video or pass the matching video"
+        )
     matcher = NeuralMatcher(backend="auto")
     print(f"[verify] anchors={tracker.num_anchors()} backend={matcher.backend}")
 
-    # Trick: match the frame against itself. This guarantees the matcher
-    # finds plenty of correspondences across the entire frame, so any
-    # remaining keypoint inside the mask is a real mask-leakage bug
-    # rather than an artifact of low feature density.
+    # Приём: сопоставляем кадр с самим собой. Так матчер гарантированно
+    # находит много соответствий по всему кадру, поэтому любая оставшаяся
+    # точка внутри маски — это настоящая утечка маски, а не следствие
+    # низкой плотности признаков.
     panels: list[np.ndarray] = []
     violations_total = 0
     for frame_idx in args.samples:
@@ -87,22 +95,23 @@ def main() -> None:
         if frame is None:
             print(f"[verify] frame={frame_idx}: read failed")
             continue
-        mask = tracker.mask_for_frame(frame_idx, frame.shape[:2])
+        mask = tracker.mask_for_frame(frame_idx, frame.shape[:2], frame=frame)
         anchor = tracker.anchor_for_frame(frame_idx)
+        diag = tracker.last_diagnostics
 
-        # Self-match: same image both sides; the satellite-side input
-        # is unmasked so the matcher would happily return keypoints
-        # anywhere in the frame. Only the drone-side mask should be
-        # what suppresses fuselage keypoints.
+        # Самосопоставление: с обеих сторон одно и то же изображение. Вход со стороны
+        # спутника не маскируется, поэтому матчер мог бы вернуть точки в любой
+        # части кадра. Подавлять точки на фюзеляже должна только маска со
+        # стороны самолёта.
         result = matcher.match(frame, frame.copy(), aircraft_mask=mask)
         mkpts0 = result["mkpts0"]
         raw = int(result.get("raw_matches", 0))
         after_mask = int(result.get("matches_after_mask", raw))
         inliers = len(mkpts0)
 
-        # Diff: same call WITHOUT mask. Counts how many inliers would
-        # have landed inside the fuselage region without the filter —
-        # that's the size of the bug we're preventing.
+        # Разница: тот же вызов, но без маски. Считаем, сколько inlier-точек
+        # попало бы на фюзеляж без фильтра — это размер ошибки, которую мы
+        # предотвращаем.
         result_nomask = matcher.match(frame, frame.copy(), aircraft_mask=None)
         kp_nomask = result_nomask["mkpts0"]
         if len(kp_nomask) > 0:
@@ -110,7 +119,7 @@ def main() -> None:
         else:
             inside_nomask = 0
 
-        # Direct assertion of the criterion:
+        # Прямая проверка критерия:
         if len(mkpts0) > 0:
             inside = ~filter_keypoints_by_mask(mkpts0, mask)
             n_inside = int(inside.sum())
@@ -119,19 +128,20 @@ def main() -> None:
         violations_total += n_inside
 
         panel_full = _draw_overlay(frame, mask, mkpts0)
-        # Downsample the original 1920x1080 frame for the contact sheet
+        # Уменьшаем исходный кадр 1920x1080 для contact sheet.
         target_w = 960
         target_h = int(panel_full.shape[0] * (target_w / panel_full.shape[1]))
         panel = cv2.resize(panel_full, (target_w, target_h), interpolation=cv2.INTER_AREA)
         panel = _label(
             panel,
             f"f={frame_idx} anchor=f{anchor.frame_index} "
-            f"raw={raw} after_mask={after_mask} inliers={inliers} "
+            f"mask={diag.method} conf={diag.confidence:.2f} raw={raw} after_mask={after_mask} inliers={inliers} "
             f"inside_mask={n_inside}  (without mask, would be inside={inside_nomask})",
         )
         panels.append(panel)
         print(
             f"[verify] f={frame_idx:>6}  anchor=f{anchor.frame_index:<6}  "
+            f"mask={diag.method:<15} conf={diag.confidence:.2f} "
             f"raw={raw:<5} after_mask={after_mask:<5} inliers={inliers:<4} "
             f"inside_mask={n_inside}  inside_nomask={inside_nomask}"
         )

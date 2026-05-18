@@ -1,4 +1,4 @@
-"""Этап 2.2: визуальная одометрия на оптическом потоке (Lucas–Kanade + ray-cast).
+"""Визуальная одометрия на оптическом потоке (Lucas–Kanade + ray-cast).
 
 Метрическая скорость в СК тела (vx, vy, м/с) и угловая скорость (рад/с)
 из двух последовательных кадров и высоты AGL.
@@ -183,10 +183,27 @@ class OpticalFlowVO:
         ransac_threshold_m: float = 3.0,
         min_features_per_frame: int = 30,
         min_inliers: int = 6,
+        downsample_to_width: int = 0,
     ) -> None:
-        self.K = np.asarray(K, dtype=np.float64).reshape(3, 3)
-        self.D = np.asarray(D, dtype=np.float64).reshape(-1, 1)
-        self.image_size = image_size
+        K_in = np.asarray(K, dtype=np.float64).reshape(3, 3)
+        D_in = np.asarray(D, dtype=np.float64).reshape(-1, 1)
+        # Опциональный downsample: на бортовом железе LK на 1920×1080 — overkill,
+        # 960×540 даёт ~3× speedup при ~той же точности. Intrinsics
+        # масштабируются (fx, fy, cx, cy * s; D-коэффициенты sccale-invariant).
+        if 0 < downsample_to_width < image_size[0]:
+            s = downsample_to_width / float(image_size[0])
+            new_w = downsample_to_width
+            new_h = int(round(image_size[1] * s))
+            scale_mat = np.array([[s, 0, 0], [0, s, 0], [0, 0, 1.0]], dtype=np.float64)
+            self.K = scale_mat @ K_in
+            self.D = D_in
+            self.image_size = (new_w, new_h)
+            self._downsample_scale = s
+        else:
+            self.K = K_in
+            self.D = D_in
+            self.image_size = image_size
+            self._downsample_scale = 1.0
         self.pitch_deg = float(pitch_deg)
         self.R_c2b = camera_to_body_rotation(self.pitch_deg)
 
@@ -219,9 +236,19 @@ class OpticalFlowVO:
         agl_m: float,
         aircraft_mask: Optional[np.ndarray] = None,
     ) -> VoStep:
+        if self._downsample_scale != 1.0:
+            target_size = self.image_size  # (W, H)
+            if (frame.shape[1], frame.shape[0]) != target_size:
+                frame = cv2.resize(frame, target_size, interpolation=cv2.INTER_AREA)
+            if aircraft_mask is not None and (
+                aircraft_mask.shape[1], aircraft_mask.shape[0]
+            ) != target_size:
+                aircraft_mask = cv2.resize(
+                    aircraft_mask, target_size, interpolation=cv2.INTER_NEAREST,
+                )
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
 
-        # Маска детектора: 255 = можно трекать. Маска фюзеляжа (Stage 1.2)
+        # Маска детектора: 255 = можно трекать. Маска фюзеляжа из этапа 1.2
         # кодирует 255-на-фюзеляже, поэтому здесь инвертируется.
         det_mask = np.full(gray.shape, 255, dtype=np.uint8)
         if aircraft_mask is not None:

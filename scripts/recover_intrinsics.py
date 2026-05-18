@@ -132,9 +132,9 @@ def _estimate_straightness(frame_bgr: np.ndarray, max_frame_size: int) -> FrameM
         used_lines += 1
 
     if used_lines == 0:
-        # No lines passed the straightness bar: this is a fallback frame, score it as zero.
-        # Edge-density-based fallback was removed in v1.4: it introduced non-deterministic
-        # score noise and masked bad profiles by lifting their aggregate above valid ones.
+        # Ни одна линия не прошла проверку прямизны: это запасной кадр с нулевой оценкой.
+        # Запасная оценка по плотности рёбер убрана в v1.4: она добавляла нестабильный
+        # шум и маскировала плохие профили, поднимая их суммарный балл выше валидных.
         return FrameMetric(score=0.0, mean_rmse=999.0, line_count=0, support_points=0, fallback=True)
 
     support_gain = math.log1p(max(1, total_support))
@@ -372,7 +372,7 @@ def _load_mast3r_focal(mast3r_json: Path | None) -> float | None:
 
 
 def _load_tiebreaker(tiebreaker_path: Path | None) -> dict[str, dict[str, float]] | None:
-    """Load focal tiebreaker report and return per-profile geometry metrics."""
+    """Загрузить отчёт выбора фокусного и вернуть геометрические метрики по профилям."""
     if tiebreaker_path is None:
         return None
     payload = _load_yaml_or_json(tiebreaker_path)
@@ -393,19 +393,18 @@ def _apply_tiebreaker(
     tiebreaker: dict[str, dict[str, float]],
     quality_gate_floor: float,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Re-rank candidates using tiebreaker metrics.
+    """Переупорядочить кандидатов по метрикам дополнительной проверки.
 
-    Rule: among profiles with straightness quality_gate >= quality_gate_floor,
-    pick the one with the lowest median essential-matrix residual. This filter
-    explicitly removes profiles whose distortion coefficients fail the
-    straightness prior on a meaningful fraction of frames, then breaks the
-    residual tie that the straightness metric cannot resolve on its own.
+    Правило: среди профилей со straightness quality_gate >= quality_gate_floor
+    выбираем профиль с минимальным медианным остатком essential matrix. Такой
+    фильтр явно убирает профили, чьи коэффициенты дисторсии проваливают
+    проверку прямизны на заметной доле кадров, а затем разбивает ничью, которую
+    одна метрика прямизны уже не различает.
 
-    Returns:
-      reordered scored list (winner first), and a diagnostic block describing
-      which candidates were considered and rejected.
+    Возвращает переупорядоченный список оценок с победителем в начале и
+    диагностический блок с рассмотренными и отброшенными кандидатами.
     """
-    # Attach tiebreaker fields
+    # Прикрепляем поля дополнительной проверки.
     for item in scored:
         entry = tiebreaker.get(item["name"])
         if entry is not None:
@@ -421,7 +420,7 @@ def _apply_tiebreaker(
     rejected_by_gate = [it["name"] for it in scored if float(it["quality_gate"]) < quality_gate_floor]
 
     if not filtered:
-        # Fallback: keep original ordering by straightness aggregate
+        # Запасной вариант: сохраняем исходный порядок по суммарной прямизне.
         diag = {
             "method": "tiebreaker_disabled_no_profiles_passed_quality_gate",
             "quality_gate_floor": float(quality_gate_floor),
@@ -429,9 +428,9 @@ def _apply_tiebreaker(
         }
         return scored, diag
 
-    # Sort filtered by residual ascending
+    # Сортируем отфильтрованные профили по возрастанию остатка.
     filtered.sort(key=lambda it: float(it["median_residual_px"]))
-    # Rebuild a full ordering: filtered first (best to worst), then rejected (by quality_gate desc)
+    # Собираем полный порядок: сначала прошедшие фильтр, затем отброшенные по quality_gate.
     remaining = [it for it in scored if it["name"] not in {f["name"] for f in filtered}]
     remaining.sort(key=lambda it: float(it["quality_gate"]), reverse=True)
     ordered = filtered + remaining
@@ -657,15 +656,15 @@ def main() -> int:
 
     winner_quality = float(best.get("quality_gate", 1.0))
     if use_tiebreaker:
-        # Residual margin: 5% already means ~5% focal error difference survives RANSAC,
-        # which is physically decisive for medium-vs-wide separation.
-        # Shift the confidence curve so that a 5% residual margin with quality_gate near 1.0
-        # clears the 0.7 acceptance threshold used as the Stage 0a gate.
+        # Запас по остатку в 5% уже означает, что RANSAC видит примерно такую же
+        # разницу в ошибке фокусного; для разделения medium и wide это существенно.
+        # Сдвигаем кривую уверенности так, чтобы 5% запаса при quality_gate около 1.0
+        # проходили порог 0.7, используемый как ворота этапа 0a.
         base = 0.7 + 1.5 * selection_margin
         confidence = _clamp01(winner_quality * base)
         ambiguous = selection_margin < 0.05
     else:
-        # Original straightness-only margin: looser because straightness saturates easily.
+        # Исходный запас только по прямизне мягче, потому что прямизна быстро насыщается.
         confidence = _clamp01(winner_quality * (0.5 + 2.5 * selection_margin))
         ambiguous = selection_margin < float(args.ambiguous_gap)
 

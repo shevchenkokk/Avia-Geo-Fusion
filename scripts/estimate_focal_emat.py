@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""Fisheye focal tiebreaker via essential matrix consistency.
+"""Выбор фокусного для fisheye через согласованность essential matrix.
 
-For each candidate (K, D) fisheye profile:
-  1. Undistort a set of frame pairs sampled from the video with a small baseline (dt ~50 ms).
-  2. Detect SIFT features and match bidirectionally (cross-check).
-  3. Estimate the essential matrix with cv2.findEssentialMat(K_rectified, RANSAC).
-  4. Record inlier_ratio per pair.
+Для каждого кандидата профиля fisheye (K, D):
+  1. Выпрямляем набор пар кадров из видео с малым базисом (dt ~50 мс).
+  2. Находим признаки SIFT и сопоставляем их с взаимной проверкой.
+  3. Оцениваем essential matrix через cv2.findEssentialMat(K_rectified, RANSAC).
+  4. Записываем inlier_ratio для каждой пары.
 
-The profile whose intrinsics best agree with the underlying scene geometry will
-produce a self-consistent epipolar structure across many independent pairs and
-therefore the highest median inlier_ratio. A wrong focal length (e.g. treating a
-Wide-FOV video as Medium-FOV, a ~20% focal mismatch) breaks the epipolar
-constraint and inlier_ratio drops measurably.
+Профиль, чьи интринсики лучше согласуются с геометрией сцены, даёт устойчивую
+эпиполярную структуру на многих независимых парах и поэтому более высокий
+медианный inlier_ratio. Неверное фокусное, например если Wide-FOV видео
+принять за Medium-FOV, ломает эпиполярное ограничение, и inlier_ratio заметно
+падает.
 
-This is used as a tiebreaker when scripts/recover_intrinsics.py reports an
-ambiguous choice between physically different profiles that both yield straight
-lines after undistort.
+Это используется как дополнительный критерий, когда scripts/recover_intrinsics.py
+получает неоднозначный выбор между физически разными профилями, у которых после
+выпрямления линии выглядят достаточно прямыми.
 """
 from __future__ import annotations
 
@@ -131,11 +131,11 @@ def _sample_pairs(
 
 
 def _apply_aircraft_mask(img: np.ndarray, left_frac: float) -> np.ndarray:
-    """Crude static mask: zero out the leftmost 'left_frac' of the frame.
+    """Грубая статическая маска: обнулить левую долю кадра ``left_frac``.
 
-    The real dynamic aircraft mask is a Stage 0b task; for the focal tiebreaker
-    we only need to prevent SIFT from locking onto the fuselage, which is the
-    dominant left-side static feature in the test video.
+    Настоящая динамическая маска самолёта относится к этапу 0b. Для выбора
+    фокусного достаточно не дать SIFT зацепиться за фюзеляж — главный
+    статичный объект слева в тестовом видео.
     """
     if left_frac <= 0.0:
         return img
@@ -183,13 +183,13 @@ def _essential_geometry_score(
     k_rectified: np.ndarray,
     ransac_threshold_px: float,
 ) -> dict[str, float]:
-    """Compute epipolar self-consistency metrics for a candidate intrinsics.
+    """Посчитать метрики эпиполярной самосогласованности для кандидата интринсиков.
 
-    Returns per-pair:
-      - inlier_ratio of RANSAC essential-matrix fit
-      - median symmetric reprojection residual of inliers (in pixels)
-      - cheirality rate: fraction of inliers triangulated with positive depth
-        in both cameras after recovering (R, t) from E.
+    На каждую пару возвращается:
+      - inlier_ratio после подгонки essential matrix через RANSAC;
+      - медианный симметричный остаток для inlier-точек, в пикселях;
+      - доля inlier-точек с положительной глубиной в обеих камерах после
+        восстановления (R, t) из E.
     """
     if len(pts_a) < 20:
         return {
@@ -230,7 +230,7 @@ def _essential_geometry_score(
     pts_a_in = pts_a[inl_mask].astype(np.float64)
     pts_b_in = pts_b[inl_mask].astype(np.float64)
 
-    # Sampson / symmetric epipolar residual in pixels, using F = K^-T E K^-1
+    # Симметричный эпиполярный остаток Сампсона в пикселях, F = K^-T E K^-1.
     k_inv = np.linalg.inv(k_rectified)
     F = k_inv.T @ E @ k_inv
 
@@ -239,10 +239,10 @@ def _essential_geometry_score(
 
     pa_h = _append_one(pts_a_in)
     pb_h = _append_one(pts_b_in)
-    # line coefficients
-    l_b = (F @ pa_h.T).T  # epipolar lines in image B for each point in A
+    # Коэффициенты прямых.
+    l_b = (F @ pa_h.T).T  # эпиполярные линии в изображении B для точек из A
     l_a = (F.T @ pb_h.T).T
-    # distance from point to its epipolar line
+    # Расстояние от точки до её эпиполярной линии.
     denom_b = np.sqrt(l_b[:, 0] ** 2 + l_b[:, 1] ** 2) + 1e-9
     denom_a = np.sqrt(l_a[:, 0] ** 2 + l_a[:, 1] ** 2) + 1e-9
     d_b = np.abs(np.sum(l_b * pb_h, axis=1)) / denom_b
@@ -250,8 +250,8 @@ def _essential_geometry_score(
     sym_residual = 0.5 * (d_a + d_b)
     median_residual = float(np.median(sym_residual))
 
-    # Cheirality: pass only inliers to recoverPose (no mask needed), and read back
-    # how many of them passed the positive-depth check in both cameras.
+    # Хиральность: передаём в recoverPose только inlier-точки и смотрим,
+    # сколько из них прошло проверку положительной глубины в обеих камерах.
     retval, R, t, _ = cv2.recoverPose(E, pts_a_in, pts_b_in, k_rectified)
     cheirality_rate = float(retval) / float(inliers) if inliers > 0 else 0.0
 
@@ -270,7 +270,7 @@ def _evaluate_candidate(
     args: argparse.Namespace,
     debug_dir: Path | None,
 ) -> dict[str, Any]:
-    # Cache K_rectified using frame size of the first pair
+    # Кэшируем K_rectified по размеру кадра из первой пары.
     h, w = pairs[0][2].shape[:2]
     k_rect = _k_rectified(candidate, w, h)
 
@@ -312,7 +312,7 @@ def _evaluate_candidate(
 
     median_ratio = float(np.median(inlier_ratios)) if inlier_ratios else 0.0
     mean_ratio = float(np.mean(inlier_ratios)) if inlier_ratios else 0.0
-    # Residual is the most focal-sensitive metric when inlier_ratio saturates.
+    # Остаток лучше всего чувствует фокусное, когда inlier_ratio насыщается.
     finite_residuals = [r for r in residuals if r < 100.0]
     median_residual = float(np.median(finite_residuals)) if finite_residuals else 999.0
     mean_cheirality = float(np.mean(cheirality)) if cheirality else 0.0
@@ -443,7 +443,7 @@ def main() -> int:
             f" matches={result['mean_matches']:.0f}"
         )
 
-    # Sort by residual ascending (primary): it is monotonic in focal error.
+    # Сортируем по возрастанию остатка: он монотонно связан с ошибкой фокусного.
     scored.sort(key=lambda r: r["median_residual_px"])
     best = scored[0]
     second = scored[1] if len(scored) > 1 else None

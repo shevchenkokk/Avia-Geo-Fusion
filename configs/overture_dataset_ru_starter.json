@@ -12,37 +12,67 @@
     {
       "id": "moscow_city_small",
       "name": "Москва (крупный город, небольшой AOI)",
-      "bbox": [37.58, 55.72, 37.64, 55.77],
+      "bbox": [
+        37.58,
+        55.72,
+        37.64,
+        55.77
+      ],
       "region_type": "city"
     },
     {
       "id": "moscow_suburb_small",
       "name": "Подмосковье (пригород, небольшой AOI)",
-      "bbox": [37.79, 55.90, 37.86, 55.96],
+      "bbox": [
+        37.79,
+        55.9,
+        37.86,
+        55.96
+      ],
       "region_type": "suburb"
     },
     {
       "id": "karelia_forest_small",
       "name": "Карелия (лес + озера, небольшой AOI)",
-      "bbox": [30.67, 61.76, 30.75, 61.82],
+      "bbox": [
+        30.67,
+        61.76,
+        30.75,
+        61.82
+      ],
       "region_type": "forest_water"
     },
     {
       "id": "krasnodar_fields_small",
       "name": "Краснодарский край (поля, небольшой AOI)",
-      "bbox": [38.76, 45.66, 38.84, 45.72],
+      "bbox": [
+        38.76,
+        45.66,
+        38.84,
+        45.72
+      ],
       "region_type": "fields"
     },
     {
       "id": "rostov_open_small",
       "name": "Ростовская область (открытая земля, небольшой AOI)",
-      "bbox": [40.25, 47.22, 40.33, 47.28],
+      "bbox": [
+        40.25,
+        47.22,
+        40.33,
+        47.28
+      ],
       "region_type": "open_land"
     },
     {
       "id": "svo_airport_small",
       "name": "Шереметьево (аэропорт/ВПП, небольшой AOI)",
-      "bbox": [37.39, 55.95, 37.46, 56.00],
+      "bbox": [
+        37.39,
+        55.95,
+        37.46,
+        56.0
+      ],
       "region_type": "airport"
     }
   ],
@@ -66,6 +96,14 @@
     {
       "name": "transportation",
       "description": "Дороги, ВПП, РД"
+    },
+    {
+      "name": "osm_water",
+      "description": "OSM water (водоёмы, ручьи, каналы) — дополнение к Overture"
+    },
+    {
+      "name": "osm_buildings",
+      "description": "OSM building footprints — дополнение к Overture"
     }
   ],
   "class_names": {
@@ -80,7 +118,6 @@
     "water.class:lake": 1,
     "water.class:ocean": 1,
     "water.class:sea": 1,
-
     "land_cover:forest": 2,
     "land_cover:grass": 2,
     "land_cover:shrub": 2,
@@ -92,9 +129,7 @@
     "land_use:horticulture": 2,
     "land_use:meadow": 2,
     "land_use:grassland": 2,
-
     "buildings:*": 3,
-
     "transportation:road": 4,
     "transportation:water": 0,
     "transportation:rail": 0,
@@ -119,9 +154,22 @@
     "transportation:pedestrian": 4,
     "transportation:runway": 4,
     "transportation:taxiway": 4,
-    "transportation:*": 4
+    "transportation:*": 4,
+    "osm_water.class:lake": 1,
+    "osm_water.class:river": 1,
+    "osm_water.class:reservoir": 1,
+    "osm_water.class:basin": 1,
+    "osm_water:*": 1,
+    "osm_buildings.class:building": 3,
+    "osm_buildings:*": 3
   },
-  "raster_priority": [4, 3, 1, 2, 0],
+  "raster_priority": [
+    4,
+    3,
+    1,
+    2,
+    0
+  ],
   "overture_download_commands": {
     "water": "{overture_cli} download --bbox {min_lon},{min_lat},{max_lon},{max_lat} -t water -f geoparquet -o {output}",
     "land_cover": "{overture_cli} download --bbox {min_lon},{min_lat},{max_lon},{max_lat} -t land_cover -f geoparquet -o {output}",

@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "description": "Example landmark schema for post-hoc GP010269.MP4 hard validation.",
+  "video": "data/videos/GP010269.MP4",
+  "frame_rate_hint_fps": 29.97002997,
+  "origin": {
+    "lat": 55.086025,
+    "lon": 38.149033,
+    "alt_msl": 130.0
+  },
+  "segments": [
+    {
+      "id": "S0",
+      "name": "Taxi / frost-on-lens start",
+      "start_s": 0.0,
+      "end_s": 30.0,
+      "kind": "edge_case_obstruction"
+    },
+    {
+      "id": "S1",
+      "name": "Climb",
+      "start_s": 30.0,
+      "end_s": 90.0,
+      "kind": "low_altitude_maneuver"
+    },
+    {
+      "id": "S2",
+      "name": "Cruise over winter fields",
+      "start_s": 90.0,
+      "end_s": 280.0,
+      "kind": "primary_winter_fields"
+    },
+    {
+      "id": "S3",
+      "name": "Cloud / obstruction",
+      "start_s": 280.0,
+      "end_s": 360.0,
+      "kind": "dead_reckoning_expected"
+    },
+    {
+      "id": "S4",
+      "name": "Post-cloud re-acquire cruise",
+      "start_s": 360.0,
+      "end_s": 510.0,
+      "kind": "reacquire"
+    },
+    {
+      "id": "S5",
+      "name": "Banking cruise",
+      "start_s": 510.0,
+      "end_s": 600.0,
+      "kind": "bank_turns"
+    },
+    {
+      "id": "S6",
+      "name": "Descent and landing",
+      "start_s": 600.0,
+      "end_s": 683.5,
+      "kind": "low_altitude_high_angular_rate"
+    }
+  ],
+  "track_thresholds": {
+    "max_sigma_pos_m": 300.0
+  },
+  "expected_dead_reckoning_segments": ["S3"],
+  "landmarks": [
+    {
+      "id": "example_start",
+      "t_sec": 45.0,
+      "lat": 55.086025,
+      "lon": 38.149033,
+      "sigma_m": 100.0,
+      "source": "example_only",
+      "note": "Replace with a visually confirmed landmark timestamp and WGS84 coordinate before reporting ATE."
+    },
+    {
+      "id": "example_offset",
+      "t_sec": 90.0,
+      "lat": 55.110000,
+      "lon": 38.200000,
+      "sigma_m": 100.0,
+      "source": "example_only",
+      "note": "Second point demonstrates interpolation; do not use as real ground truth."
+    }
+  ]
+}

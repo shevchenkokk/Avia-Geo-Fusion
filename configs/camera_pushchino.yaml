@@ -1,0 +1,27 @@
+lens_model: fisheye
+image_size:
+- 3840
+- 2160
+pitch_deg: -60.0
+selected_profile: pushchino_sony_4k_calibrated
+lens_profile_source: grid_search_focal_scale_1.3_agl500_pitch-60
+recommended_agl_m: 500.0
+recovery_confidence: 0.778
+selection_margin: 0.111
+ambiguous: false
+K: &id001
+- - 4992.0
+  - 0.0
+  - 1920
+- - 0.0
+  - 4992.0
+  - 1080
+- - 0.0
+  - 0.0
+  - 1.0
+D:
+- 0.0
+- 0.0
+- 0.0
+- 0.0
+K_rectified: *id001

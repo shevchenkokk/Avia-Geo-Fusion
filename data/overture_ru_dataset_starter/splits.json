@@ -1,9 +1,16 @@
 {
   "train_regions": [
-    "moscow_city_small"
+    "moscow_city_small",
+    "moscow_suburb_small",
+    "rostov_open_small",
+    "svo_airport_small"
   ],
-  "val_regions": [],
-  "test_regions": [],
+  "val_regions": [
+    "krasnodar_fields_small"
+  ],
+  "test_regions": [
+    "karelia_forest_small"
+  ],
   "patch_size": 512,
   "selection_strategy": "rare-classes-boost",
   "used_clean_meta": true

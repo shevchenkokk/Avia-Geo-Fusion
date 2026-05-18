@@ -47,7 +47,14 @@
     "transportation:pedestrian": 4,
     "transportation:runway": 4,
     "transportation:taxiway": 4,
-    "transportation:*": 4
+    "transportation:*": 4,
+    "osm_water.class:lake": 1,
+    "osm_water.class:river": 1,
+    "osm_water.class:reservoir": 1,
+    "osm_water.class:basin": 1,
+    "osm_water:*": 1,
+    "osm_buildings.class:building": 3,
+    "osm_buildings:*": 3
   },
   "raster_priority": [
     4,
